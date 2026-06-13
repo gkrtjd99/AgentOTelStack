@@ -41,23 +41,11 @@ app (OTLP) ──> OpenTelemetry Collector ──fanout──> VictoriaLogs    (
                                                  │
            ┌─────────────────────────────────────┘  ./obs/*.sh  (query · correlate)
            ▼
-  ┌───────────────────────────────┐
-  │  coding agent (any)           │  ← Claude Code · Codex · OpenCode · …
-  │  observe → correlate → reason │  (CLAUDE.md is a symlink to AGENTS.md,
-  │                               │  so every agent reads one source)
-  └────────────────┬──────────────┘
-                   │  edit app/ · docker compose up -d --build app
-                   ▼
-             ┌───────────┐
-             │  codebase │
-             └─────┬─────┘
-                   │  re-run
-                   ▼
-       ┌──────────────────┐
-       │  workload/run.sh │  ──▶ e2e/ (Playwright UI journey)
-       └───────────┬──────┘
-                   │  new telemetry → observe again (loop closes)
-                   └──────────────────▶ obs tools
+  ┌─────────────────────────────────┐
+  │  coding agent (any)             │  <- Claude Code, Codex, OpenCode, ...
+  │  observe -> correlate -> reason │  (CLAUDE.md is a symlink to AGENTS.md,
+  │                                 │  so every agent reads one source)
+  └────────────────┬────────────────┘
 ```
 
 ### Why
@@ -275,22 +263,10 @@ app (OTLP) ──> OpenTelemetry Collector ──fanout──> VictoriaLogs    (
            ┌─────────────────────────────────────┘  ./obs/*.sh  (조회 · 상관)
            ▼
   ┌──────────────────────────────┐
-  │  코딩 에이전트 (어느 것이든) │  ← Claude Code · Codex · OpenCode · …
-  │  관찰 → 상관 → 추론          │  (CLAUDE.md ── symlink ──> AGENTS.md,
+  │  코딩 에이전트 (어느 것이든) │  <- Claude Code, Codex, OpenCode, ...
+  │  관찰 -> 상관 -> 추론        │  (CLAUDE.md는 AGENTS.md로 심링크되어
   │                              │  모든 에이전트가 하나의 소스를 읽음)
   └────────────────┬─────────────┘
-                   │  app/ 수정 · docker compose up -d --build app
-                   ▼
-             ┌─────────────┐
-             │  코드베이스 │
-             └─────┬───────┘
-                   │  재실행
-                   ▼
-       ┌──────────────────┐
-       │  workload/run.sh │  ──▶ e2e/ (Playwright UI 여정)
-       └───────────┬──────┘
-                   │  새 텔레메트리 → 다시 관찰 (루프 폐쇄)
-                   └──────────────────▶ obs tools
 ```
 
 ### 왜 쓰는가
