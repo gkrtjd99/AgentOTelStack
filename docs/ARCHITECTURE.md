@@ -75,9 +75,6 @@
 2. **fan-out(복제)이 한 곳에서.** 신호별로 어느 저장소로 보낼지를 컬렉터가 결정.
 3. **가공 지점.** batching, 리소스 속성 보존, (장차) 시크릿 redaction 등을 한 곳에서.
 
-> **2026 설계 노트 (Vector를 안 쓰는 이유):** Vector의 OpenTelemetry source는 OTLP **메트릭을
-> 못 받고** 로그/메트릭을 OTLP로 **내보내지 못한다**. OpenTelemetry Collector는 3종을 모두
-> 네이티브로 fan-out 하므로 이걸 쓴다.
 
 ---
 
@@ -186,8 +183,8 @@ VT_URL=${VT_URL:-http://localhost:10428}  # VictoriaTraces
 ./obs/traces.sh search-errors sample-app     # 에러 트레이스만 (tags={"error":"true"})
 ./obs/traces.sh get <traceID>                # 트레이스 전체
 ```
-> VictoriaTraces는 2026 기준 **네이티브 TraceQL이 없다.** 그래서 Jaeger query API로 조회한다.
-> 그게 traces.sh가 Jaeger식 서브커맨드를 쓰는 이유.
+> VictoriaTraces는 **Jaeger query API**로 조회한다. 그게 traces.sh가 Jaeger식
+> 서브커맨드를 쓰는 이유.
 
 ### 4.2 `correlate.sh` — 이 스택의 핵심 동작
 
@@ -283,8 +280,8 @@ make clean       # 정지 + 저장된 텔레메트리 전부 삭제 (docker comp
 - **메트릭이 안 보임** → 메트릭은 `OTEL_METRIC_EXPORT_INTERVAL` 주기로만 push된다.
   샘플 앱은 10s. 몇 초 기다리거나 export interval을 줄여라.
 - **로그 레벨로 필터가 안 됨** → 필드는 `severity_text`다. `level`이 아니다.
-- **트레이스가 TraceQL로 안 됨** → VictoriaTraces는 TraceQL이 없다. `traces.sh`의 Jaeger
-  서브커맨드를 써라.
+- **트레이스를 TraceQL로 조회하면 안 됨** → VictoriaTraces는 Jaeger API만 쓴다.
+  `traces.sh`의 Jaeger 서브커맨드를 써라.
 - **PromQL에서 라벨이 점 표기로 안 잡힘** → OTLP 점(`.`)이 밑줄(`_`)로 변환된다.
   `service.name` → `service_name`.
 - **컬렉터가 데이터를 받는지 모르겠음** → `docker compose logs otel-collector` (debug

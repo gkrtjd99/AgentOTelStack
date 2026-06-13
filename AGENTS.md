@@ -26,10 +26,10 @@ app (OTLP) ──> otel-collector ──fanout──> VictoriaLogs   :9428  (Log
                                        └─> VictoriaTraces  :10428 (Jaeger query API)
 ```
 
-- The **OpenTelemetry Collector** is the single fan-out point (not Vector — as of
-  2026 Vector's OTLP source can't ingest metrics or export logs/metrics over OTLP).
-- **VictoriaTraces has no native TraceQL** (2026) — it speaks the **Jaeger query API**.
-  That's why `obs/traces.sh` uses Jaeger-style subcommands.
+- The **OpenTelemetry Collector** is the single fan-out point — it receives all
+  OTLP signals and replicates them to the three stores.
+- **VictoriaTraces** is queried through the **Jaeger query API**, so
+  `obs/traces.sh` uses Jaeger-style subcommands.
 
 ## Query tools (your interface)
 

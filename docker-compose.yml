@@ -2,10 +2,7 @@
 #
 # Flow:  app --OTLP--> otel-collector --fanout--> VictoriaLogs / VictoriaMetrics / VictoriaTraces
 # Agents read telemetry back via the query APIs using the helper scripts in ./obs.
-#
-# 2026 note: Vector is intentionally NOT used as the collector — its OpenTelemetry
-# source does not ingest OTLP metrics and cannot export logs/metrics over OTLP.
-# The OpenTelemetry Collector fans out all three signals natively.
+# The OpenTelemetry Collector fans out all three signals (logs/metrics/traces) natively.
 
 name: dev-observability
 

@@ -27,10 +27,10 @@ app (OTLP) ──> OpenTelemetry Collector ──fanout──> VictoriaLogs    (
                           ./obs/*.sh  query tools  +  AGENTS.md  ┘   ← any agent
 ```
 
-- The **OpenTelemetry Collector** is the single fan-out point (not Vector — as of
-  2026 Vector's OTLP source can't ingest metrics or export logs/metrics over OTLP).
-- **VictoriaTraces has no native TraceQL** (2026) — it speaks the **Jaeger query
-  API**. That's why `obs/traces.sh` uses Jaeger-style subcommands.
+- The **OpenTelemetry Collector** is the single fan-out point — it receives all
+  OTLP signals and replicates them to the three stores.
+- **VictoriaTraces** is queried through the **Jaeger query API**, so
+  `obs/traces.sh` uses Jaeger-style subcommands.
 
 ### The feedback loop
 
@@ -41,11 +41,11 @@ app (OTLP) ──> OpenTelemetry Collector ──fanout──> VictoriaLogs    (
                                                  │
            ┌─────────────────────────────────────┘  ./obs/*.sh  (query · correlate)
            ▼
-  ┌──────────────────────────────────┐
-  │  coding agent (any)              │  ← Claude Code · Codex · OpenCode · …
-  │  observe → correlate → reason    │     (CLAUDE.md is a symlink to AGENTS.md,
-  │                                  │      so every agent reads one source)
-  └────────────────┬─────────────────┘
+  ┌───────────────────────────────┐
+  │  coding agent (any)           │  ← Claude Code · Codex · OpenCode · …
+  │  observe → correlate → reason │  (CLAUDE.md is a symlink to AGENTS.md,
+  │                               │  so every agent reads one source)
+  └────────────────┬──────────────┘
                    │  edit app/ · docker compose up -d --build app
                    ▼
              ┌───────────┐
@@ -53,11 +53,11 @@ app (OTLP) ──> OpenTelemetry Collector ──fanout──> VictoriaLogs    (
              └─────┬─────┘
                    │  re-run
                    ▼
-       ┌──────────────────────┐
-       │ workload/run.sh      │ ──▶  e2e/ (Playwright UI journey)
-       └──────────┬───────────┘
-                  │  new telemetry → observe again (loop closes)
-                  └──────────────────────▶ obs tools
+       ┌──────────────────┐
+       │  workload/run.sh │  ──▶ e2e/ (Playwright UI journey)
+       └───────────┬──────┘
+                   │  new telemetry → observe again (loop closes)
+                   └──────────────────▶ obs tools
 ```
 
 ### Why
@@ -78,7 +78,7 @@ tell you *what* broke but not *where* or *why*. This stack:
 
 ### What you get
 
-With this stack attached you can answer, in **numbers** (see [Verified](#verified-2026-06-09)):
+With this stack attached you can answer, in **numbers** (see [Verified](#verified)):
 
 - **Error rate** — `sum(...{outcome="error"}) / sum(...)` → e.g. 18.7%
 - **Latency distribution** — `histogram_quantile(0.95, ...)` → e.g. p95 4.75s
@@ -89,9 +89,9 @@ With this stack attached you can answer, in **numbers** (see [Verified](#verifie
 
 So instead of "I think I fixed it", you say **"error rate 18.7% → 0%"**.
 
-### Verified (2026-06-09)
+### Verified
 
-> Final verification date **2026-06-09**. Below are actual run results, not claims.
+> Actual run results, not claims.
 
 Booted the full stack with `make demo`, drove load with `./workload/run.sh 150`,
 then queried all four tools:
@@ -260,10 +260,10 @@ app (OTLP) ──> OpenTelemetry Collector ──fanout──> VictoriaLogs    (
                           ./obs/*.sh  조회 도구  +  AGENTS.md  ┘   ← 어떤 에이전트든
 ```
 
-- 팬아웃은 **OpenTelemetry Collector**가 담당합니다 (Vector가 아님 — 2026년 기준 Vector의
-  OTLP source는 메트릭을 못 받고 로그/메트릭을 OTLP로 내보내지 못합니다).
-- **VictoriaTraces는 네이티브 TraceQL이 없습니다**(2026) — **Jaeger query API**로
-  조회합니다. 그래서 `obs/traces.sh`가 Jaeger식 서브커맨드를 씁니다.
+- 팬아웃은 **OpenTelemetry Collector**가 담당합니다 — OTLP 로그/메트릭/트레이스 3종을
+  받아 각 저장소로 복제합니다.
+- **VictoriaTraces**는 **Jaeger query API**로 조회합니다. 그래서 `obs/traces.sh`가
+  Jaeger식 서브커맨드를 씁니다.
 
 ### 피드백 루프
 
@@ -274,23 +274,23 @@ app (OTLP) ──> OpenTelemetry Collector ──fanout──> VictoriaLogs    (
                                                  │
            ┌─────────────────────────────────────┘  ./obs/*.sh  (조회 · 상관)
            ▼
-  ┌──────────────────────────────────┐
-  │  코딩 에이전트 (어느 것이든)        │  ← Claude Code · Codex · OpenCode · …
-  │  관찰 → 상관 → 추론                │     (CLAUDE.md는 AGENTS.md로 심링크되어
-  │                                  │      모든 에이전트가 하나의 소스를 읽음)
-  └────────────────┬─────────────────┘
+  ┌──────────────────────────────┐
+  │  코딩 에이전트 (어느 것이든) │  ← Claude Code · Codex · OpenCode · …
+  │  관찰 → 상관 → 추론          │  (CLAUDE.md ── symlink ──> AGENTS.md,
+  │                              │  모든 에이전트가 하나의 소스를 읽음)
+  └────────────────┬─────────────┘
                    │  app/ 수정 · docker compose up -d --build app
                    ▼
-             ┌───────────┐
+             ┌─────────────┐
              │  코드베이스 │
-             └─────┬─────┘
+             └─────┬───────┘
                    │  재실행
                    ▼
-       ┌──────────────────────┐
-       │ workload/run.sh      │ ──▶  e2e/ (Playwright UI 여정)
-       └──────────┬───────────┘
-                  │  새 텔레메트리 → 다시 관찰 (루프 폐쇄)
-                  └──────────────────────▶ obs tools
+       ┌──────────────────┐
+       │  workload/run.sh │  ──▶ e2e/ (Playwright UI 여정)
+       └───────────┬──────┘
+                   │  새 텔레메트리 → 다시 관찰 (루프 폐쇄)
+                   └──────────────────▶ obs tools
 ```
 
 ### 왜 쓰는가
@@ -310,7 +310,7 @@ app (OTLP) ──> OpenTelemetry Collector ──fanout──> VictoriaLogs    (
 
 ### 무엇을 얻는가
 
-이 스택을 붙이면 다음을 **수치로** 답할 수 있게 됩니다 ([검증](#검증-2026-06-09) 참고):
+이 스택을 붙이면 다음을 **수치로** 답할 수 있게 됩니다 ([검증](#검증) 참고):
 
 - **에러율** — `sum(...{outcome="error"}) / sum(...)` → 예: 18.7%
 - **지연 분포** — `histogram_quantile(0.95, ...)` → 예: p95 4.75s
@@ -321,9 +321,9 @@ app (OTLP) ──> OpenTelemetry Collector ──fanout──> VictoriaLogs    (
 
 즉 "고친 것 같다"가 아니라 **"에러율 18.7% → 0%로 떨어졌다"**고 말할 수 있습니다.
 
-### 검증 (2026-06-09)
+### 검증
 
-> 최종 검증일 **2026-06-09**. 아래는 실제 실행 결과입니다(주장 아님).
+> 아래는 실제 실행 결과입니다(주장 아님).
 
 `make demo`로 풀스택을 띄우고 `./workload/run.sh 150`으로 부하를 준 뒤 네 도구를 모두 조회:
 
