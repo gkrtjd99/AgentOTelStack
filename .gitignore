@@ -1,0 +1,111 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Secrets & credentials — NEVER commit.
+# This stack wires into real services that hold secrets (API keys, tokens, DB
+# passwords). Leaking one is a real incident, so be aggressive here.
+# ─────────────────────────────────────────────────────────────────────────────
+.env
+.env.*
+!.env.example
+
+# private keys / certs / keystores
+*.pem
+*.key
+*.crt
+*.cer
+*.p12
+*.pfx
+*.keystore
+*.jks
+
+# commonly-named secret files & folders
+secrets/
+credentials/
+**/credentials
+*secret*
+*credential*
+*api_key*
+*apikey*
+*passphrase*
+id_rsa
+id_rsa.pub
+id_ed25519
+.kube/
+.aws/
+
+# ─────────────────────────────────────────────────────────────────────────────
+# OS / desktop clutter (personal-machine artifacts)
+# ─────────────────────────────────────────────────────────────────────────────
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+Thumbs.db
+desktop.ini
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Editor / IDE / personal tooling
+# ─────────────────────────────────────────────────────────────────────────────
+.idea/
+.vscode/
+*.code-workspace
+*.swp
+*.swo
+*.swn
+*~
+.project
+.settings/
+.history/
+
+# agent-local settings (per-machine paths, permissions, personal overrides)
+.claude/settings.local.json
+.codex/
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Node.js (app/ and e2e/)
+# (lockfiles are intentionally NOT ignored — keep package-lock.json for repro)
+# ─────────────────────────────────────────────────────────────────────────────
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Playwright / e2e
+# ─────────────────────────────────────────────────────────────────────────────
+e2e/test-results/
+e2e/playwright-report/
+e2e/node_modules/
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Python (apps that connect to this stack may be Python)
+# ─────────────────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+.python-version
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Go / compiled artifacts
+# ─────────────────────────────────────────────────────────────────────────────
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+bin/
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Logs / temp / cache / backups
+# ─────────────────────────────────────────────────────────────────────────────
+*.log
+logs/
+*.tmp
+*.bak
+*.orig
+.cache/
+tmp/

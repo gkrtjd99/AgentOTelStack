@@ -1,0 +1,60 @@
+# OpenTelemetry Collector (contrib) — single fan-out point for all three signals.
+# Receives OTLP from the app, replicates each signal to the matching Victoria* store.
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  batch:
+    timeout: 5s
+    send_batch_size: 1024
+  # Keep host/process resource attributes that the SDK attaches.
+  resource_detection:
+    detectors: [env]
+    timeout: 2s
+
+exporters:
+  # Logs -> VictoriaLogs OTLP endpoint
+  otlp_http/vlogs:
+    logs_endpoint: http://victorialogs:9428/insert/opentelemetry/v1/logs
+    tls:
+      insecure: true
+
+  # Metrics -> VictoriaMetrics OTLP endpoint
+  otlp_http/vmetrics:
+    metrics_endpoint: http://victoriametrics:8428/opentelemetry/v1/metrics
+    tls:
+      insecure: true
+
+  # Traces -> VictoriaTraces OTLP endpoint
+  otlp_http/vtraces:
+    traces_endpoint: http://victoriatraces:10428/insert/opentelemetry/v1/traces
+    tls:
+      insecure: true
+
+  # Console echo for local debugging (`docker compose logs otel-collector`)
+  debug:
+    verbosity: basic
+
+service:
+  telemetry:
+    logs:
+      level: info
+  pipelines:
+    logs:
+      receivers: [otlp]
+      processors: [resource_detection, batch]
+      exporters: [otlp_http/vlogs, debug]
+    metrics:
+      receivers: [otlp]
+      processors: [resource_detection, batch]
+      exporters: [otlp_http/vmetrics, debug]
+    traces:
+      receivers: [otlp]
+      processors: [resource_detection, batch]
+      exporters: [otlp_http/vtraces, debug]

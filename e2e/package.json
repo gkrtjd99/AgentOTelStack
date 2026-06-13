@@ -1,0 +1,13 @@
+{
+  "name": "e2e-runner",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Browser UI journey against the sample app. Generates telemetry the agent can observe.",
+  "scripts": {
+    "test": "playwright test",
+    "install-browsers": "playwright install chromium"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.49.0"
+  }
+}

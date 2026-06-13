@@ -1,0 +1,24 @@
+{
+  "name": "sample-app",
+  "version": "1.0.0",
+  "private": true,
+  "type": "commonjs",
+  "description": "Swappable sample app under observation. Emits OTLP logs/metrics/traces.",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node --require ./src/otel.js src/index.js"
+  },
+  "dependencies": {
+    "@opentelemetry/api": "^1.9.0",
+    "@opentelemetry/auto-instrumentations-node": "0.52.1",
+    "@opentelemetry/exporter-logs-otlp-proto": "0.54.2",
+    "@opentelemetry/exporter-metrics-otlp-proto": "0.54.2",
+    "@opentelemetry/exporter-trace-otlp-proto": "0.54.2",
+    "@opentelemetry/sdk-logs": "0.54.2",
+    "@opentelemetry/sdk-metrics": "1.27.0",
+    "@opentelemetry/sdk-node": "0.54.2",
+    "express": "^4.21.2",
+    "pino": "^9.5.0",
+    "pino-http": "^10.3.0"
+  }
+}

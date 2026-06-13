@@ -1,0 +1,112 @@
+# Local observability stack for AI coding agents (Claude Code / Codex / OpenCode).
+#
+# Flow:  app --OTLP--> otel-collector --fanout--> VictoriaLogs / VictoriaMetrics / VictoriaTraces
+# Agents read telemetry back via the query APIs using the helper scripts in ./obs.
+#
+# 2026 note: Vector is intentionally NOT used as the collector — its OpenTelemetry
+# source does not ingest OTLP metrics and cannot export logs/metrics over OTLP.
+# The OpenTelemetry Collector fans out all three signals natively.
+
+name: dev-observability
+
+networks:
+  default:
+    name: dev-observability
+
+services:
+  # ---- Storage: logs -------------------------------------------------------
+  victorialogs:
+    image: victoriametrics/victoria-logs:latest
+    container_name: victorialogs
+    command:
+      - -storageDataPath=/vlogs
+      - -httpListenAddr=:9428
+    ports:
+      - "9428:9428" # LogQL query API + OTLP logs ingestion
+    volumes:
+      - victorialogs-data:/vlogs
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:9428/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  # ---- Storage: metrics ----------------------------------------------------
+  victoriametrics:
+    image: victoriametrics/victoria-metrics:latest
+    container_name: victoriametrics
+    command:
+      - -storageDataPath=/vmdata
+      - -httpListenAddr=:8428
+      - -opentelemetry.usePrometheusNaming=true # nicer metric names from OTLP
+    ports:
+      - "8428:8428" # PromQL query API + OTLP metrics ingestion
+    volumes:
+      - victoriametrics-data:/vmdata
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8428/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  # ---- Storage: traces -----------------------------------------------------
+  victoriatraces:
+    image: victoriametrics/victoria-traces:latest
+    container_name: victoriatraces
+    command:
+      - -storageDataPath=/vtraces
+      - -httpListenAddr=:10428
+    ports:
+      - "10428:10428" # Jaeger query API + OTLP traces ingestion
+    volumes:
+      - victoriatraces-data:/vtraces
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:10428/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  # ---- Fan-out collector ---------------------------------------------------
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:latest
+    container_name: otel-collector
+    command: ["--config=/etc/otelcol/config.yaml"]
+    volumes:
+      - ./otel-collector/config.yaml:/etc/otelcol/config.yaml:ro
+    ports:
+      - "4317:4317" # OTLP gRPC
+      - "4318:4318" # OTLP HTTP
+    depends_on:
+      victorialogs:
+        condition: service_healthy
+      victoriametrics:
+        condition: service_healthy
+      victoriatraces:
+        condition: service_healthy
+
+  # ---- Sample app under observation (swappable: bring your own) -------------
+  # Behind the `demo` profile so the default `docker compose up` starts ONLY the
+  # shared infra (collector + stores). Your own apps run on the host and point at
+  # http://localhost:4318. To run the bundled demo: `docker compose --profile demo up`.
+  app:
+    build: ./app
+    container_name: app
+    profiles: ["demo"]
+    environment:
+      OTEL_SERVICE_NAME: sample-app
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
+      OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
+      OTEL_METRIC_EXPORT_INTERVAL: "10000" # 10s for demo responsiveness (default 60s)
+      OTEL_NODE_RESOURCE_DETECTORS: env,host,os
+      OTEL_RESOURCE_ATTRIBUTES: deployment.environment=dev,service.namespace=demo
+      PORT: "3000"
+    ports:
+      - "3000:3000"
+    depends_on:
+      otel-collector:
+        condition: service_started
+
+volumes:
+  victorialogs-data:
+  victoriametrics-data:
+  victoriatraces-data:

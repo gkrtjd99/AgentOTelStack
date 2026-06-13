@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>sample-app</title>
+    <style>
+      body { font-family: system-ui, sans-serif; max-width: 640px; margin: 4rem auto; }
+      button { padding: .6rem 1rem; margin-right: .5rem; cursor: pointer; }
+      pre { background: #111; color: #0f0; padding: 1rem; min-height: 3rem; }
+    </style>
+  </head>
+  <body>
+    <h1>sample-app</h1>
+    <p>Click to generate telemetry. Each action produces a trace, logs, and metrics.</p>
+    <button id="order">Process order</button>
+    <button id="checkout">Checkout</button>
+    <button id="fail">Force failure</button>
+    <pre id="out">ready</pre>
+    <script>
+      const out = document.getElementById("out");
+      async function hit(url, label) {
+        out.textContent = label + " …";
+        try {
+          const r = await fetch(url);
+          out.textContent = label + " → " + r.status + "\n" + (await r.text());
+        } catch (e) {
+          out.textContent = label + " → error: " + e.message;
+        }
+      }
+      document.getElementById("order").onclick = () =>
+        hit("/api/orders/" + Math.floor(Math.random() * 1000), "order");
+      document.getElementById("checkout").onclick = () => hit("/api/checkout", "checkout");
+      document.getElementById("fail").onclick = () => hit("/api/checkout?fail=1", "forced failure");
+    </script>
+  </body>
+</html>
