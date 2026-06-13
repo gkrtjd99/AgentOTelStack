@@ -4,7 +4,7 @@
 
 A local observability stack for AI coding agents (**Claude Code · Codex ·
 OpenCode …**) and humans. One shared, Docker-based backend for
-**logs · metrics · traces**, with an **observe → reason → change → re-run**
+**logs · metrics · traces**, with an **observe -> reason -> change -> re-run**
 feedback loop driven by plain `curl` query tools. No SDK needed to *read*
 telemetry — any agent reads `AGENTS.md` and uses the same four scripts.
 
@@ -20,11 +20,12 @@ telemetry back through `./obs/*.sh`.
 ### Architecture
 
 ```
-app (OTLP) ──> OpenTelemetry Collector ──fanout──> VictoriaLogs    (LogQL)
-                                                ├─> VictoriaMetrics  (PromQL)
-                                                └─> VictoriaTraces   (Jaeger query)
-                                                       ▲
-                          ./obs/*.sh  query tools  +  AGENTS.md  ┘   ← any agent
+app (OTLP) --> OpenTelemetry Collector --fanout--> VictoriaLogs    (LogQL)
+                                                |-> VictoriaMetrics (PromQL)
+                                                `-> VictoriaTraces  (Jaeger query)
+                                                       ^
+                                                       |
+                     ./obs/*.sh query tools + AGENTS.md (any agent)
 ```
 
 - The **OpenTelemetry Collector** is the single fan-out point — it receives all
@@ -35,17 +36,36 @@ app (OTLP) ──> OpenTelemetry Collector ──fanout──> VictoriaLogs    (
 ### The feedback loop
 
 ```
-  app ──OTLP──> otel-collector ──fanout──> VictoriaLogs    (LogQL)
-                                         ├─> VictoriaMetrics (PromQL)
-                                         └─> VictoriaTraces  (Jaeger query)
-                                                 │
-           ┌─────────────────────────────────────┘  ./obs/*.sh  (query · correlate)
-           ▼
-  ┌─────────────────────────────────┐
-  │  coding agent (any)             │  <- Claude Code, Codex, OpenCode, ...
-  │  observe -> correlate -> reason │  (CLAUDE.md is a symlink to AGENTS.md,
-  │                                 │  so every agent reads one source)
-  └────────────────┬────────────────┘
++-----------------------------+
+| 1. Observe                  |
+| metrics + logs + traces     |
++--------------+--------------+
+               |
+               v
++-----------------------------+
+| 2. Correlate                |
+| obs/correlate.sh <trace_id> |
++--------------+--------------+
+               |
+               v
++-----------------------------+
+| 3. Reason + change code     |
+| edit app/ or target service |
++--------------+--------------+
+               |
+               v
++-----------------------------+
+| 4. Rebuild + re-run         |
+| workload/run.sh or e2e      |
++--------------+--------------+
+               |
+               v
++-----------------------------+
+| 5. Compare new telemetry    |
+| repeat until verified       |
++--------------+--------------+
+               |
+               `---- back to observe
 ```
 
 ### Why
@@ -97,7 +117,8 @@ Reproduce in [Reproduce](#reproduce).
 
 ### Prerequisites
 
-- **Docker** (Docker Desktop or Engine) — runs all 5 containers.
+- **Docker** (Docker Desktop or Engine) — runs the collector, stores, and
+  optional demo app.
 - **`jq`** — the `./obs/*.sh` query scripts use it to pretty-print JSON
   (`brew install jq` / `apt install jq`).
 - **`make`** *(optional)* — convenience wrapper. Without it, run
@@ -160,12 +181,12 @@ correlate output shows the `GET /api/checkout` span with `http.status_code=500`.
 This is **not** a library you install *into* each project. It is one shared
 backend that every project *points at*. Two layers:
 
-```
-Layer 1 — backend (ONE copy)              Layer 2 — per app (tiny)
-~/AgentOTelStack/             each project's own folder
-  make up  →  5 containers                  4 env vars (+ otel.js for Node)
-  shared by every local app                 emit OTLP to :4318
-```
+| Layer | Lives where | What you do |
+|---|---|---|
+| Backend (one copy) | `~/AgentOTelStack/` | Run `make up` for the 4 shared infra containers: collector + VictoriaLogs/Metrics/Traces. |
+| Per app (tiny) | Each project folder | Set 4 env vars; Node apps may add one `otel.js`; emit OTLP to `:4318`. |
+
+Use `make demo` when you also want the bundled `sample-app` on `:3000`.
 
 **Layer 2 — the only per-app footprint.** Set four env vars and run your app:
 
@@ -241,11 +262,12 @@ make clean         # stop + wipe all stored telemetry (docker compose down -v)
 ### 아키텍처
 
 ```
-app (OTLP) ──> OpenTelemetry Collector ──fanout──> VictoriaLogs    (LogQL)
-                                                ├─> VictoriaMetrics  (PromQL)
-                                                └─> VictoriaTraces   (Jaeger query)
-                                                       ▲
-                          ./obs/*.sh  조회 도구  +  AGENTS.md  ┘   ← 어떤 에이전트든
+app (OTLP) --> OpenTelemetry Collector --fanout--> VictoriaLogs    (LogQL)
+                                                |-> VictoriaMetrics (PromQL)
+                                                `-> VictoriaTraces  (Jaeger query)
+                                                       ^
+                                                       |
+                     ./obs/*.sh query tools + AGENTS.md (any agent)
 ```
 
 - 팬아웃은 **OpenTelemetry Collector**가 담당합니다 — OTLP 로그/메트릭/트레이스 3종을
@@ -256,17 +278,36 @@ app (OTLP) ──> OpenTelemetry Collector ──fanout──> VictoriaLogs    (
 ### 피드백 루프
 
 ```
-  app ──OTLP──> otel-collector ──fanout──> VictoriaLogs    (LogQL)
-                                         ├─> VictoriaMetrics (PromQL)
-                                         └─> VictoriaTraces  (Jaeger query)
-                                                 │
-           ┌─────────────────────────────────────┘  ./obs/*.sh  (조회 · 상관)
-           ▼
-  ┌──────────────────────────────┐
-  │  코딩 에이전트 (어느 것이든) │  <- Claude Code, Codex, OpenCode, ...
-  │  관찰 -> 상관 -> 추론        │  (CLAUDE.md는 AGENTS.md로 심링크되어
-  │                              │  모든 에이전트가 하나의 소스를 읽음)
-  └────────────────┬─────────────┘
++-----------------------------+
+| 1. Observe                  |
+| metrics + logs + traces     |
++--------------+--------------+
+               |
+               v
++-----------------------------+
+| 2. Correlate                |
+| obs/correlate.sh <trace_id> |
++--------------+--------------+
+               |
+               v
++-----------------------------+
+| 3. Reason + change code     |
+| edit app/ or target service |
++--------------+--------------+
+               |
+               v
++-----------------------------+
+| 4. Rebuild + re-run         |
+| workload/run.sh or e2e      |
++--------------+--------------+
+               |
+               v
++-----------------------------+
+| 5. Compare new telemetry    |
+| repeat until verified       |
++--------------+--------------+
+               |
+               `---- back to observe
 ```
 
 ### 왜 쓰는가
@@ -316,7 +357,7 @@ app (OTLP) ──> OpenTelemetry Collector ──fanout──> VictoriaLogs    (
 
 ### 사전 요구
 
-- **Docker**(Docker Desktop 또는 Engine) — 5개 컨테이너를 실행.
+- **Docker**(Docker Desktop 또는 Engine) — 컬렉터, 저장소, 선택적 데모 앱을 실행.
 - **`jq`** — `./obs/*.sh` 조회 스크립트가 JSON을 정리 출력할 때 사용
   (`brew install jq` / `apt install jq`).
 - **`make`** *(선택)* — 편의 래퍼. 없으면 `docker compose up -d`로 직접 실행
@@ -379,12 +420,12 @@ correlate 출력에서 `GET /api/checkout` 스팬의 `http.status_code=500`.
 이건 각 프로젝트에 *설치하는* 라이브러리가 아닙니다. 모든 프로젝트가 *가리키는* 공유
 백엔드가 하나 있습니다. 두 층:
 
-```
-층1 — 백엔드 (1개만)                    층2 — 앱마다 (아주 작음)
-~/AgentOTelStack/          각 프로젝트 폴더
-  make up  →  컨테이너 5개               env 4개 (+ Node면 otel.js 1개)
-  모든 로컬 앱이 공유                    :4318로 OTLP 송신
-```
+| 층 | 위치 | 할 일 |
+|---|---|---|
+| 백엔드 (1개만) | `~/AgentOTelStack/` | `make up`으로 공유 인프라 컨테이너 4개(collector + VictoriaLogs/Metrics/Traces)를 실행 |
+| 앱마다 (아주 작음) | 각 프로젝트 폴더 | env 4개 설정; Node 앱은 `otel.js` 1개를 추가할 수 있음; `:4318`로 OTLP 송신 |
+
+번들 `sample-app`(`:3000`)까지 같이 보려면 `make demo`를 씁니다.
 
 **층2 — 앱마다 생기는 것은 이것뿐.** env 4개를 설정하고 앱을 실행:
 
