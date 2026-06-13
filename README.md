@@ -1,4 +1,4 @@
-# agent-otel-stack
+# AgentOTelStack
 
 > **[English](#english) · [한국어](#한국어)**
 
@@ -174,7 +174,7 @@ backend that every project *points at*. Two layers:
 
 ```
 Layer 1 — backend (ONE copy)              Layer 2 — per app (tiny)
-~/agent-otel-stack/             each project's own folder
+~/AgentOTelStack/             each project's own folder
   make up  →  5 containers                  4 env vars (+ otel.js for Node)
   shared by every local app                 emit OTLP to :4318
 ```
@@ -405,7 +405,7 @@ correlate 출력에서 `GET /api/checkout` 스팬의 `http.status_code=500`.
 
 ```
 층1 — 백엔드 (1개만)                    층2 — 앱마다 (아주 작음)
-~/agent-otel-stack/          각 프로젝트 폴더
+~/AgentOTelStack/          각 프로젝트 폴더
   make up  →  컨테이너 5개               env 4개 (+ Node면 otel.js 1개)
   모든 로컬 앱이 공유                    :4318로 OTLP 송신
 ```
