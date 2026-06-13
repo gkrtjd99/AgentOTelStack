@@ -1,4 +1,4 @@
-# ObservabilityStack
+# agent-otel-stack
 
 > **[English](#english) · [한국어](#한국어)**
 
@@ -107,6 +107,16 @@ then queried all four tools:
 
 Reproduce in [Reproduce](#reproduce).
 
+### Prerequisites
+
+- **Docker** (Docker Desktop or Engine) — runs all 5 containers.
+- **`jq`** — the `./obs/*.sh` query scripts use it to pretty-print JSON
+  (`brew install jq` / `apt install jq`).
+- **`make`** *(optional)* — convenience wrapper. Without it, run
+  `docker compose up -d` directly (raw commands are in `Makefile`).
+- Your app must emit **OTLP**. If it doesn't yet, see
+  [docs/CONNECT.md](./docs/CONNECT.md) (Node / Python / Java / Go).
+
 ### Quick start
 
 **Want to attach your own app?** → **[docs/CONNECT.md](./docs/CONNECT.md)**. Summary:
@@ -164,7 +174,7 @@ backend that every project *points at*. Two layers:
 
 ```
 Layer 1 — backend (ONE copy)              Layer 2 — per app (tiny)
-~/Desktop/ObservabilityStack/             each project's own folder
+~/agent-otel-stack/             each project's own folder
   make up  →  5 containers                  4 env vars (+ otel.js for Node)
   shared by every local app                 emit OTLP to :4318
 ```
@@ -328,6 +338,16 @@ app (OTLP) ──> OpenTelemetry Collector ──fanout──> VictoriaLogs    (
 
 재현은 [검증 재현](#검증-재현) 절 참고.
 
+### 사전 요구
+
+- **Docker**(Docker Desktop 또는 Engine) — 5개 컨테이너를 실행.
+- **`jq`** — `./obs/*.sh` 조회 스크립트가 JSON을 정리 출력할 때 사용
+  (`brew install jq` / `apt install jq`).
+- **`make`** *(선택)* — 편의 래퍼. 없으면 `docker compose up -d`로 직접 실행
+  (원시 명령은 `Makefile` 참고).
+- 본인 앱이 **OTLP**를 송신해야 함. 아직이면
+  [docs/CONNECT.md](./docs/CONNECT.md) 참고 (Node / Python / Java / Go).
+
 ### Quick start
 
 **내 앱을 붙이려면?** → **[docs/CONNECT.md](./docs/CONNECT.md)**. 요약:
@@ -385,7 +405,7 @@ correlate 출력에서 `GET /api/checkout` 스팬의 `http.status_code=500`.
 
 ```
 층1 — 백엔드 (1개만)                    층2 — 앱마다 (아주 작음)
-~/Desktop/ObservabilityStack/          각 프로젝트 폴더
+~/agent-otel-stack/          각 프로젝트 폴더
   make up  →  컨테이너 5개               env 4개 (+ Node면 otel.js 1개)
   모든 로컬 앱이 공유                    :4318로 OTLP 송신
 ```

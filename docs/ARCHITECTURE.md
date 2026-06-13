@@ -1,4 +1,4 @@
-# ObservabilityStack 동작 구조 (런타임 아키텍처)
+# agent-otel-stack 동작 구조 (런타임 아키텍처)
 
 > 이 문서는 **이 스택이 실제로 어떻게 돌아가는가**를 설명한다.
 > - 도구 *사용법*은 [`AGENTS.md`](../AGENTS.md)
