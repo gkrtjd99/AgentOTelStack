@@ -19,13 +19,35 @@ telemetry back through `./obs/*.sh`.
 
 ### Architecture
 
-```
-app (OTLP) --> OpenTelemetry Collector --fanout--> VictoriaLogs    (LogQL)
-                                                |-> VictoriaMetrics (PromQL)
-                                                `-> VictoriaTraces  (Jaeger query)
-                                                       ^
-                                                       |
-                     ./obs/*.sh query tools + AGENTS.md (any agent)
+Read this left to right: apps write telemetry into the collector; agents read
+it back through the query scripts.
+
+```mermaid
+flowchart LR
+  subgraph Apps["Apps that emit OTLP"]
+    Own["Your local app<br/>OTEL_SERVICE_NAME=my-app"]
+    Demo["Bundled sample-app<br/>make demo only"]
+  end
+
+  Collector["OpenTelemetry Collector<br/>OTLP :4317 / :4318"]
+
+  Own -->|"logs / metrics / traces"| Collector
+  Demo -->|"logs / metrics / traces"| Collector
+
+  Collector -->|"logs"| Logs["VictoriaLogs<br/>:9428 LogQL"]
+  Collector -->|"metrics"| Metrics["VictoriaMetrics<br/>:8428 PromQL"]
+  Collector -->|"traces"| Traces["VictoriaTraces<br/>:10428 Jaeger query API"]
+
+  Logs --> LogTool["obs/logs.sh"]
+  Metrics --> MetricTool["obs/metrics.sh"]
+  Traces --> TraceTool["obs/traces.sh"]
+  Logs --> Correlate["obs/correlate.sh"]
+  Traces --> Correlate
+
+  LogTool --> Reader["Agent or human<br/>reads AGENTS.md"]
+  MetricTool --> Reader
+  TraceTool --> Reader
+  Correlate --> Reader
 ```
 
 - The **OpenTelemetry Collector** is the single fan-out point — it receives all
@@ -35,37 +57,32 @@ app (OTLP) --> OpenTelemetry Collector --fanout--> VictoriaLogs    (LogQL)
 
 ### The feedback loop
 
-```
-+-----------------------------+
-| 1. Observe                  |
-| metrics + logs + traces     |
-+--------------+--------------+
-               |
-               v
-+-----------------------------+
-| 2. Correlate                |
-| obs/correlate.sh <trace_id> |
-+--------------+--------------+
-               |
-               v
-+-----------------------------+
-| 3. Reason + change code     |
-| edit app/ or target service |
-+--------------+--------------+
-               |
-               v
-+-----------------------------+
-| 4. Rebuild + re-run         |
-| workload/run.sh or e2e      |
-+--------------+--------------+
-               |
-               v
-+-----------------------------+
-| 5. Compare new telemetry    |
-| repeat until verified       |
-+--------------+--------------+
-               |
-               `---- back to observe
+The loop is not just "look at logs". Metrics tell you whether something is
+wrong; logs and traces tell you which request and code path explain it.
+
+```mermaid
+flowchart TD
+  Workload["Run or rerun workload<br/>workload/run.sh or e2e"]
+  Observe["Observe<br/>metrics, logs, traces"]
+  Problem{"Bad signal?"}
+  TraceID["Pick one failing trace_id<br/>from an error log or trace search"]
+  Correlate["Correlate<br/>obs/correlate.sh trace_id"]
+  Reason["Reason from spans + logs<br/>find the failing operation"]
+  Change["Change code<br/>app/ or your own service"]
+  Rebuild["Rebuild and restart<br/>then rerun the workload"]
+  Compare["Compare with baseline or target<br/>error rate, latency, failures"]
+  Done["Done<br/>keep the measured result"]
+
+  Workload --> Observe
+  Observe --> Compare
+  Compare --> Problem
+  Problem -- "no" --> Done
+  Problem -- "yes" --> TraceID
+  TraceID --> Correlate
+  Correlate --> Reason
+  Reason --> Change
+  Change --> Rebuild
+  Rebuild --> Workload
 ```
 
 ### Why
@@ -261,13 +278,35 @@ make clean         # stop + wipe all stored telemetry (docker compose down -v)
 
 ### 아키텍처
 
-```
-app (OTLP) --> OpenTelemetry Collector --fanout--> VictoriaLogs    (LogQL)
-                                                |-> VictoriaMetrics (PromQL)
-                                                `-> VictoriaTraces  (Jaeger query)
-                                                       ^
-                                                       |
-                     ./obs/*.sh query tools + AGENTS.md (any agent)
+왼쪽에서 오른쪽으로 보면 됩니다. 앱은 컬렉터로 텔레메트리를 쓰고, 에이전트는 조회
+스크립트로 다시 읽습니다.
+
+```mermaid
+flowchart LR
+  subgraph Apps["OTLP를 보내는 앱"]
+    Own["내 로컬 앱<br/>OTEL_SERVICE_NAME=my-app"]
+    Demo["번들 sample-app<br/>make demo일 때만"]
+  end
+
+  Collector["OpenTelemetry Collector<br/>OTLP :4317 / :4318"]
+
+  Own -->|"logs / metrics / traces"| Collector
+  Demo -->|"logs / metrics / traces"| Collector
+
+  Collector -->|"logs"| Logs["VictoriaLogs<br/>:9428 LogQL"]
+  Collector -->|"metrics"| Metrics["VictoriaMetrics<br/>:8428 PromQL"]
+  Collector -->|"traces"| Traces["VictoriaTraces<br/>:10428 Jaeger query API"]
+
+  Logs --> LogTool["obs/logs.sh"]
+  Metrics --> MetricTool["obs/metrics.sh"]
+  Traces --> TraceTool["obs/traces.sh"]
+  Logs --> Correlate["obs/correlate.sh"]
+  Traces --> Correlate
+
+  LogTool --> Reader["에이전트 또는 사람<br/>AGENTS.md를 읽고 사용"]
+  MetricTool --> Reader
+  TraceTool --> Reader
+  Correlate --> Reader
 ```
 
 - 팬아웃은 **OpenTelemetry Collector**가 담당합니다 — OTLP 로그/메트릭/트레이스 3종을
@@ -277,37 +316,32 @@ app (OTLP) --> OpenTelemetry Collector --fanout--> VictoriaLogs    (LogQL)
 
 ### 피드백 루프
 
-```
-+-----------------------------+
-| 1. Observe                  |
-| metrics + logs + traces     |
-+--------------+--------------+
-               |
-               v
-+-----------------------------+
-| 2. Correlate                |
-| obs/correlate.sh <trace_id> |
-+--------------+--------------+
-               |
-               v
-+-----------------------------+
-| 3. Reason + change code     |
-| edit app/ or target service |
-+--------------+--------------+
-               |
-               v
-+-----------------------------+
-| 4. Rebuild + re-run         |
-| workload/run.sh or e2e      |
-+--------------+--------------+
-               |
-               v
-+-----------------------------+
-| 5. Compare new telemetry    |
-| repeat until verified       |
-+--------------+--------------+
-               |
-               `---- back to observe
+루프는 단순히 "로그 보기"가 아닙니다. 메트릭은 문제가 있는지 알려주고, 로그와
+트레이스는 어떤 요청/코드 경로 때문인지 알려줍니다.
+
+```mermaid
+flowchart TD
+  Workload["워크로드 실행 또는 재실행<br/>workload/run.sh 또는 e2e"]
+  Observe["관찰<br/>metrics, logs, traces"]
+  Problem{"나쁜 신호가 있나?"}
+  TraceID["실패 trace_id 하나 선택<br/>에러 로그 또는 trace search에서"]
+  Correlate["상관분석<br/>obs/correlate.sh trace_id"]
+  Reason["span + log로 추론<br/>실패한 작업 찾기"]
+  Change["코드 변경<br/>app/ 또는 내 서비스"]
+  Rebuild["재빌드/재시작<br/>그 다음 워크로드 재실행"]
+  Compare["기준값 또는 이전 실행과 비교<br/>에러율, 지연, 실패"]
+  Done["완료<br/>측정 결과를 남김"]
+
+  Workload --> Observe
+  Observe --> Compare
+  Compare --> Problem
+  Problem -- "아니오" --> Done
+  Problem -- "예" --> TraceID
+  TraceID --> Correlate
+  Correlate --> Reason
+  Reason --> Change
+  Change --> Rebuild
+  Rebuild --> Workload
 ```
 
 ### 왜 쓰는가
