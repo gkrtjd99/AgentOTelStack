@@ -17,7 +17,7 @@
 source "$(dirname "$0")/common.sh"
 
 query="${1:-_time:5m *}"
-limit="${2:-20}"
+limit="$(limit_value "${2:-20}")"
 
 curl -s "${VL_URL}/select/logsql/query" \
   --data-urlencode "query=${query}" \

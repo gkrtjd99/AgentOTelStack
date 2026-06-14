@@ -6,7 +6,7 @@ A local observability stack for AI coding agents (**Claude Code · Codex ·
 OpenCode …**) and humans. One shared, Docker-based backend for
 **logs · metrics · traces**, with an **observe -> reason -> change -> re-run**
 feedback loop driven by plain `curl` query tools. No SDK needed to *read*
-telemetry — any agent reads `AGENTS.md` and uses the same four scripts.
+telemetry — any agent reads `AGENTS.md` and uses the same `obs/*.sh` tools.
 
 ---
 
@@ -95,7 +95,7 @@ tell you *what* broke but not *where* or *why*. This stack:
 - **Pivots across signals on `trace_id`** — "error rate spiked" (metric) →
   "this request failed" (log) → "this span in this code path returned 500"
   (trace), all at once. (`./obs/correlate.sh`)
-- **Needs no SDK to read** — just four `curl` wrappers (`./obs/*.sh`). Any agent
+- **Needs no SDK to read** — just `curl` wrappers (`./obs/*.sh`). Any agent
   reads `AGENTS.md` and runs the same loop with the same tools.
 - **Is shared by every local project once it's up** — give each app a different
   `OTEL_SERVICE_NAME` and they all report into the same backend and are queried
@@ -165,9 +165,20 @@ make demo           # = docker compose --profile demo up -d --build
 
 # 4. (optional) run a browser UI journey
 cd e2e && npm install && npm run install-browsers && npm test
+
+# 5. (optional) run the automated smoke test / terminal dashboard
+make smoke
+make dashboard SERVICE=sample-app
+make dashboard SERVICE=sample-app MODE=compact LOOKBACK=15m
+./obs/overview.sh --json --since 15m sample-app
+
+# 6. (optional) browser dashboard
+make grafana
 ```
 
-Sample app UI: <http://localhost:3000>.
+Sample app UI: <http://localhost:3000>. Optional Grafana UI:
+<http://localhost:3001>, with the `ObservabilityStack / Local Observability`
+dashboard provisioned automatically.
 
 > `make up` starts **only the shared infra** (collector + 3 stores) — the
 > bring-your-own-app default. `make demo` adds the bundled sample app.
@@ -237,13 +248,20 @@ Multiple apps? They all land in the same stores; filter by service name:
 |---|---|
 | `docker-compose.yml` | Orchestrates Victoria ×3 + collector + app on the `dev-observability` network |
 | `otel-collector/config.yaml` | OTLP receive → fan-out to the 3 stores |
-| `app/` | **Swappable** sample service (Node + zero-code OTel). Replace with your own. |
-| `obs/` | Agent query tools: `logs.sh` (LogQL), `metrics.sh` (PromQL), `traces.sh` (Jaeger), `correlate.sh` |
+| `app/` | **Swappable** sample service (Node + explicit OTel bootstrap + lockfile). Replace with your own. |
+| `obs/` | Agent query tools: `logs.sh` (LogQL), `metrics.sh` (PromQL), `traces.sh` (Jaeger), `correlate.sh`, plus multi-app helpers |
+| `scripts/smoke.sh` | End-to-end write/read path verification (`make smoke`) |
+| `dashboards/local-observability.json` | Optional Grafana dashboard provisioned by the `dashboard` profile |
+| `grafana/provisioning/` | Grafana datasource and dashboard provider provisioning |
+| `.github/workflows/ci.yml` | Static validation, npm audit, and Docker smoke test |
 | `workload/run.sh` | Synthetic load generator |
 | `e2e/` | Playwright browser UI journey |
 | `AGENTS.md` | **Operating guide every agent reads** (`CLAUDE.md` is a symlink to it) |
 | `docs/ARCHITECTURE.md` | **Runtime structure** — write/read paths, collector fan-out, querying |
 | `docs/CONNECT.md` | How to point your own app at the stack (per language) |
+| `docs/DASHBOARD.md` | Terminal overview and built-in Victoria UI entry points |
+| `docs/DASHBOARD_PLAN.md` | Dashboard roadmap and implementation phases |
+| `docs/SECURITY.md` | Local-only security model and remote exposure guidance |
 
 ### Ports
 
@@ -254,6 +272,7 @@ Multiple apps? They all land in the same stores; filter by service name:
 | VictoriaLogs | 9428 | LogQL query API (`logs.sh`) |
 | VictoriaMetrics | 8428 | PromQL query API (`metrics.sh`) |
 | VictoriaTraces | 10428 | Jaeger query API (`traces.sh`) |
+| Grafana | 3001 | Optional browser dashboard (`make grafana`) |
 
 ### Teardown
 
@@ -267,6 +286,9 @@ make clean         # stop + wipe all stored telemetry (docker compose down -v)
 - **[AGENTS.md](./AGENTS.md)** — the operating guide (full workflow, conventions).
 - **[docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md)** — runtime internals.
 - **[docs/CONNECT.md](./docs/CONNECT.md)** — attach your own app.
+- **[docs/DASHBOARD.md](./docs/DASHBOARD.md)** — terminal and Grafana dashboard usage.
+- **[docs/DASHBOARD_PLAN.md](./docs/DASHBOARD_PLAN.md)** — dashboard roadmap.
+- **[docs/SECURITY.md](./docs/SECURITY.md)** — local security boundaries.
 
 ---
 
@@ -354,7 +376,7 @@ flowchart TD
 - **`trace_id`로 신호를 가로질러 pivot 합니다** — "에러율이 올랐다"(metric) → "이 요청이
   실패했다"(log) → "이 코드 경로의 이 스팬에서 500이 났다"(trace)를 한 번에 추적합니다.
   (`./obs/correlate.sh`)
-- **읽는 데 SDK가 필요 없습니다** — 그냥 `curl` 래퍼 4개(`./obs/*.sh`). 어떤 에이전트든
+- **읽는 데 SDK가 필요 없습니다** — 그냥 `curl` 래퍼(`./obs/*.sh`). 어떤 에이전트든
   `AGENTS.md`만 읽으면 같은 도구로 같은 루프를 돕니다.
 - **한 번 켜두면 모든 로컬 프로젝트가 공유합니다** — 앱마다 `OTEL_SERVICE_NAME`만 다르게
   주면 같은 백엔드로 보고하고 나란히 조회됩니다.
@@ -421,9 +443,20 @@ make demo           # = docker compose --profile demo up -d --build
 
 # 4. (선택) 브라우저 UI 여정 실행
 cd e2e && npm install && npm run install-browsers && npm test
+
+# 5. (선택) 자동 smoke test / 터미널 대시보드
+make smoke
+make dashboard SERVICE=sample-app
+make dashboard SERVICE=sample-app MODE=compact LOOKBACK=15m
+./obs/overview.sh --json --since 15m sample-app
+
+# 6. (선택) 브라우저 대시보드
+make grafana
 ```
 
-샘플 앱 UI: <http://localhost:3000>.
+샘플 앱 UI: <http://localhost:3000>. 선택형 Grafana UI:
+<http://localhost:3001>. `ObservabilityStack / Local Observability` 대시보드가
+자동 provision됩니다.
 
 > `make up`은 **공유 인프라만**(collector + 저장소 3종) 띄웁니다 — bring-your-own-app
 > 기본값. `make demo`는 여기에 샘플 앱을 더합니다.
@@ -493,13 +526,20 @@ export OTEL_RESOURCE_ATTRIBUTES=deployment.environment=dev
 |---|---|
 | `docker-compose.yml` | Victoria 3종 + collector + app을 `dev-observability` 네트워크에 오케스트레이션 |
 | `otel-collector/config.yaml` | OTLP 수신 → 3종 저장소로 fan-out |
-| `app/` | **교체 가능한** 샘플 서비스 (Node + zero-code OTel). 내 앱으로 바꿔 관측. |
-| `obs/` | 에이전트 조회 도구: `logs.sh`(LogQL), `metrics.sh`(PromQL), `traces.sh`(Jaeger), `correlate.sh` |
+| `app/` | **교체 가능한** 샘플 서비스 (Node + 명시적 OTel bootstrap + lockfile). 내 앱으로 바꿔 관측. |
+| `obs/` | 에이전트 조회 도구: `logs.sh`(LogQL), `metrics.sh`(PromQL), `traces.sh`(Jaeger), `correlate.sh`, 다중 앱 helper |
+| `scripts/smoke.sh` | write/read path 자동 검증 (`make smoke`) |
+| `dashboards/local-observability.json` | `dashboard` profile로 provision되는 선택형 Grafana dashboard |
+| `grafana/provisioning/` | Grafana datasource와 dashboard provider provisioning |
+| `.github/workflows/ci.yml` | 정적 검증, npm audit, Docker smoke test |
 | `workload/run.sh` | 합성 부하 생성기 |
 | `e2e/` | Playwright 브라우저 UI 여정 |
 | `AGENTS.md` | **모든 에이전트가 읽는 운영 가이드** (`CLAUDE.md`가 심링크) |
 | `docs/ARCHITECTURE.md` | **런타임 동작 구조** — write/read path, 컬렉터 fan-out, 조회 방식 |
 | `docs/CONNECT.md` | 내 앱을 OTLP로 붙이는 법 (언어별) |
+| `docs/DASHBOARD.md` | 터미널 overview와 Victoria 내장 UI 진입점 |
+| `docs/DASHBOARD_PLAN.md` | 대시보드 로드맵과 구현 단계 |
+| `docs/SECURITY.md` | 로컬 보안 경계와 원격 노출 가이드 |
 
 ### 포트
 
@@ -510,6 +550,7 @@ export OTEL_RESOURCE_ATTRIBUTES=deployment.environment=dev
 | VictoriaLogs | 9428 | LogQL 쿼리 API (`logs.sh`) |
 | VictoriaMetrics | 8428 | PromQL 쿼리 API (`metrics.sh`) |
 | VictoriaTraces | 10428 | Jaeger 쿼리 API (`traces.sh`) |
+| Grafana | 3001 | 선택형 브라우저 대시보드 (`make grafana`) |
 
 ### 종료
 
@@ -523,3 +564,6 @@ make clean         # 정지 + 저장된 텔레메트리 전부 삭제 (docker co
 - **[AGENTS.md](./AGENTS.md)** — 운영 가이드 (전체 워크플로, 규칙).
 - **[docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md)** — 런타임 내부 구조.
 - **[docs/CONNECT.md](./docs/CONNECT.md)** — 내 앱 연결법.
+- **[docs/DASHBOARD.md](./docs/DASHBOARD.md)** — 터미널/Grafana 대시보드 사용법.
+- **[docs/DASHBOARD_PLAN.md](./docs/DASHBOARD_PLAN.md)** — 대시보드 로드맵.
+- **[docs/SECURITY.md](./docs/SECURITY.md)** — 로컬 보안 경계.

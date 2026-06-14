@@ -1,10 +1,10 @@
 // Sample business logic under observation.
 //
-// Instrumentation is zero-code: the process is started with
-//   node --require @opentelemetry/auto-instrumentations-node/register
-// which wires up OTLP traces, metrics, and logs from OTEL_* env vars
-// (see docker-compose.yml). The pino instrumentation bridges these logs
-// to OTLP automatically, so app logs land in VictoriaLogs with trace_id.
+// Instrumentation is loaded by app/src/otel.js via:
+//   node --require ./src/otel.js src/index.js
+// It wires up OTLP traces, metrics, and logs from OTEL_* env vars
+// (see docker-compose.yml). The pino instrumentation bridges logs to OTLP,
+// so app logs land in VictoriaLogs with trace_id.
 
 const express = require("express");
 const pinoHttp = require("pino-http");

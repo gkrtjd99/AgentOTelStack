@@ -1,0 +1,720 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": {
+          "type": "grafana",
+          "uid": "-- Grafana --"
+        },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "id": null,
+  "links": [
+    {
+      "asDropdown": false,
+      "icon": "external link",
+      "includeVars": false,
+      "keepTime": false,
+      "tags": [],
+      "targetBlank": true,
+      "title": "VictoriaMetrics UI",
+      "tooltip": "Open VictoriaMetrics VMUI",
+      "type": "link",
+      "url": "http://localhost:8428/vmui/"
+    },
+    {
+      "asDropdown": false,
+      "icon": "external link",
+      "includeVars": false,
+      "keepTime": false,
+      "tags": [],
+      "targetBlank": true,
+      "title": "VictoriaLogs UI",
+      "tooltip": "Open VictoriaLogs VMUI",
+      "type": "link",
+      "url": "http://localhost:9428/select/vmui/"
+    },
+    {
+      "asDropdown": false,
+      "icon": "external link",
+      "includeVars": false,
+      "keepTime": false,
+      "tags": [],
+      "targetBlank": true,
+      "title": "VictoriaTraces UI",
+      "tooltip": "Open Jaeger-compatible trace UI",
+      "type": "link",
+      "url": "http://localhost:10428/select/jaeger/"
+    }
+  ],
+  "panels": [
+    {
+      "datasource": {
+        "type": "__expr__",
+        "uid": "__expr__"
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "id": 1,
+      "options": {
+        "code": {
+          "language": "plaintext",
+          "showLineNumbers": false,
+          "showMiniMap": false
+        },
+        "content": "AgentOTelStack local dashboard. Metrics are queried from VictoriaMetrics. Error logs are queried from VictoriaLogs. Traces open in the Jaeger-compatible VictoriaTraces UI. Agent-grade commands remain: ./obs/overview.sh --compact $service and ./obs/correlate.sh <trace_id>.",
+        "mode": "markdown"
+      },
+      "pluginVersion": "12.2.5",
+      "title": "Entry Points",
+      "type": "text"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "victoriametrics"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "inspect": false
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 8,
+        "x": 0,
+        "y": 5
+      },
+      "id": 2,
+      "options": {
+        "cellHeight": "sm",
+        "footer": {
+          "countRows": false,
+          "fields": "",
+          "reducer": [
+            "sum"
+          ],
+          "show": false
+        },
+        "showHeader": true
+      },
+      "pluginVersion": "12.2.5",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "victoriametrics"
+          },
+          "editorMode": "code",
+          "expr": "sum by (outcome) (orders_processed_total{service_name=\"$service\"})",
+          "format": "table",
+          "instant": true,
+          "legendFormat": "{{outcome}}",
+          "range": false,
+          "refId": "A"
+        }
+      ],
+      "title": "Orders By Outcome",
+      "type": "table"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "victoriametrics"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 0.05
+              },
+              {
+                "color": "red",
+                "value": 0.15
+              }
+            ]
+          },
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 8,
+        "x": 8,
+        "y": 5
+      },
+      "id": 3,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "percentChangeColorMode": "standard",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "pluginVersion": "12.2.5",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "victoriametrics"
+          },
+          "editorMode": "code",
+          "expr": "sum(orders_processed_total{service_name=\"$service\",outcome=\"error\"}) / clamp_min(sum(orders_processed_total{service_name=\"$service\"}), 1)",
+          "instant": false,
+          "legendFormat": "error ratio",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Order Error Ratio",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "victoriametrics"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 0.5
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 8,
+        "x": 16,
+        "y": 5
+      },
+      "id": 4,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "percentChangeColorMode": "standard",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "pluginVersion": "12.2.5",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "victoriametrics"
+          },
+          "editorMode": "code",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(order_processing_seconds_bucket{service_name=\"$service\"}[$__rate_interval])))",
+          "instant": false,
+          "legendFormat": "p95",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Order p95 Latency",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "victoriametrics"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "barWidthFactor": 0.6,
+            "drawStyle": "line",
+            "fillOpacity": 12,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 4,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 10
+      },
+      "id": 5,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "hideZeros": false,
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "pluginVersion": "12.2.5",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "victoriametrics"
+          },
+          "editorMode": "code",
+          "expr": "sum by (http_status_code) (rate(http_server_duration_milliseconds_count{service_name=\"$service\"}[$__rate_interval]))",
+          "instant": false,
+          "legendFormat": "{{http_status_code}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "HTTP Request Rate By Status",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "victoriametrics"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "barWidthFactor": 0.6,
+            "drawStyle": "line",
+            "fillOpacity": 12,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 4,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "ms"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 10
+      },
+      "id": 6,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "hideZeros": false,
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "pluginVersion": "12.2.5",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "victoriametrics"
+          },
+          "editorMode": "code",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(http_server_duration_milliseconds_bucket{service_name=\"$service\"}[$__rate_interval])))",
+          "instant": false,
+          "legendFormat": "p95",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "HTTP p95 Latency",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "victoriametrics"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "barWidthFactor": 0.6,
+            "drawStyle": "line",
+            "fillOpacity": 12,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 4,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 18
+      },
+      "id": 7,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "hideZeros": false,
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "pluginVersion": "12.2.5",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "victoriametrics"
+          },
+          "editorMode": "code",
+          "expr": "sum by (outcome) (rate(orders_processed_total{service_name=\"$service\"}[$__rate_interval]))",
+          "instant": false,
+          "legendFormat": "{{outcome}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Orders Per Second By Outcome",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "__expr__",
+        "uid": "__expr__"
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 18
+      },
+      "id": 8,
+      "options": {
+        "code": {
+          "language": "plaintext",
+          "showLineNumbers": false,
+          "showMiniMap": false
+        },
+        "content": "Trace workflow\n\nOpen the trace UI: http://localhost:10428/select/jaeger/\n\nRecent error traces:\n./obs/traces.sh search-errors $service 10 1h\n\nCorrelate one trace:\n./obs/correlate.sh <trace_id>",
+        "mode": "markdown"
+      },
+      "pluginVersion": "12.2.5",
+      "title": "Trace Workflow",
+      "type": "text"
+    },
+    {
+      "datasource": {
+        "type": "victoriametrics-logs-datasource",
+        "uid": "victorialogs"
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 10,
+        "w": 24,
+        "x": 0,
+        "y": 26
+      },
+      "id": 9,
+      "options": {
+        "dedupStrategy": "none",
+        "enableLogDetails": true,
+        "prettifyLogMessage": false,
+        "showCommonLabels": false,
+        "showLabels": true,
+        "showTime": true,
+        "sortOrder": "Descending",
+        "wrapLogMessage": false
+      },
+      "pluginVersion": "12.2.5",
+      "targets": [
+        {
+          "datasource": {
+            "type": "victoriametrics-logs-datasource",
+            "uid": "victorialogs"
+          },
+          "direction": "desc",
+          "editorMode": "code",
+          "expr": "_time:1h service.name:$service severity_text:error | fields _time, _msg, req.url, forced, trace_id",
+          "maxLines": 20,
+          "queryType": "instant",
+          "refId": "A"
+        }
+      ],
+      "title": "Recent Error Logs",
+      "type": "logs"
+    }
+  ],
+  "preload": false,
+  "refresh": "10s",
+  "schemaVersion": 42,
+  "tags": [
+    "local",
+    "opentelemetry",
+    "victoriametrics"
+  ],
+  "templating": {
+    "list": [
+      {
+        "current": {
+          "selected": true,
+          "text": "sample-app",
+          "value": "sample-app"
+        },
+        "datasource": {
+          "type": "prometheus",
+          "uid": "victoriametrics"
+        },
+        "definition": "label_values(service_name)",
+        "hide": 0,
+        "includeAll": false,
+        "label": "service",
+        "multi": false,
+        "name": "service",
+        "options": [],
+        "query": {
+          "query": "label_values(service_name)",
+          "refId": "VictoriaMetricsVariableQuery"
+        },
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 1,
+        "type": "query"
+      }
+    ]
+  },
+  "time": {
+    "from": "now-15m",
+    "to": "now"
+  },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "Local Observability",
+  "uid": "local-observability",
+  "version": 1,
+  "weekStart": ""
+}

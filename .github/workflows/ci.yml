@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  static:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate shell scripts
+        run: |
+          bash -n obs/common.sh obs/logs.sh obs/metrics.sh obs/traces.sh \
+            obs/correlate.sh obs/app.sh obs/overview.sh scripts/smoke.sh \
+            workload/run.sh
+
+      - name: Validate compose config
+        run: docker compose --profile demo --profile dashboard config
+
+      - name: Validate dashboard assets
+        run: |
+          jq empty dashboards/local-observability.json
+          test -f grafana/provisioning/datasources/datasources.yml
+          test -f grafana/provisioning/dashboards/dashboards.yml
+
+      - name: Install app dependencies from lockfile
+        working-directory: app
+        run: npm ci --omit=dev
+
+      - name: Audit app production dependencies
+        working-directory: app
+        run: npm audit --omit=dev --audit-level=high
+
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run end-to-end observability smoke test
+        run: make smoke N=40
+
+      - name: Show stack logs on failure
+        if: failure()
+        run: docker compose --profile demo logs --no-color --tail=300
+
+      - name: Stop stack
+        if: always()
+        run: docker compose --profile demo down

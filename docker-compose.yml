@@ -13,13 +13,13 @@ networks:
 services:
   # ---- Storage: logs -------------------------------------------------------
   victorialogs:
-    image: victoriametrics/victoria-logs:latest
+    image: victoriametrics/victoria-logs@sha256:ae9bea8d8a3b0fc47c7f0058bcca410e79c84b4a0acd12d4dac71b9302526590
     container_name: victorialogs
     command:
       - -storageDataPath=/vlogs
       - -httpListenAddr=:9428
     ports:
-      - "9428:9428" # LogQL query API + OTLP logs ingestion
+      - "127.0.0.1:9428:9428" # LogQL query API + OTLP logs ingestion
     volumes:
       - victorialogs-data:/vlogs
     healthcheck:
@@ -30,14 +30,14 @@ services:
 
   # ---- Storage: metrics ----------------------------------------------------
   victoriametrics:
-    image: victoriametrics/victoria-metrics:latest
+    image: victoriametrics/victoria-metrics@sha256:dc030542eb0cd262287c9ec32e5867f8dcccc0efd5906c10f7fc8176c53d34d7
     container_name: victoriametrics
     command:
       - -storageDataPath=/vmdata
       - -httpListenAddr=:8428
       - -opentelemetry.usePrometheusNaming=true # nicer metric names from OTLP
     ports:
-      - "8428:8428" # PromQL query API + OTLP metrics ingestion
+      - "127.0.0.1:8428:8428" # PromQL query API + OTLP metrics ingestion
     volumes:
       - victoriametrics-data:/vmdata
     healthcheck:
@@ -48,13 +48,13 @@ services:
 
   # ---- Storage: traces -----------------------------------------------------
   victoriatraces:
-    image: victoriametrics/victoria-traces:latest
+    image: victoriametrics/victoria-traces@sha256:d42615c458b5698737c33411359012a1136c3f579e4c2516687db2ea7ed08362
     container_name: victoriatraces
     command:
       - -storageDataPath=/vtraces
       - -httpListenAddr=:10428
     ports:
-      - "10428:10428" # Jaeger query API + OTLP traces ingestion
+      - "127.0.0.1:10428:10428" # Jaeger query API + OTLP traces ingestion
     volumes:
       - victoriatraces-data:/vtraces
     healthcheck:
@@ -65,14 +65,14 @@ services:
 
   # ---- Fan-out collector ---------------------------------------------------
   otel-collector:
-    image: otel/opentelemetry-collector-contrib:latest
+    image: otel/opentelemetry-collector-contrib@sha256:93aad750175cbf1a973ae1c5886c3371f4d800f61be25cdd26870b8441ffe9fa
     container_name: otel-collector
     command: ["--config=/etc/otelcol/config.yaml"]
     volumes:
       - ./otel-collector/config.yaml:/etc/otelcol/config.yaml:ro
     ports:
-      - "4317:4317" # OTLP gRPC
-      - "4318:4318" # OTLP HTTP
+      - "127.0.0.1:4317:4317" # OTLP gRPC
+      - "127.0.0.1:4318:4318" # OTLP HTTP
     depends_on:
       victorialogs:
         condition: service_healthy
@@ -95,15 +95,45 @@ services:
       OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
       OTEL_METRIC_EXPORT_INTERVAL: "10000" # 10s for demo responsiveness (default 60s)
       OTEL_NODE_RESOURCE_DETECTORS: env,host,os
-      OTEL_RESOURCE_ATTRIBUTES: deployment.environment=dev,service.namespace=demo
+      OTEL_RESOURCE_ATTRIBUTES: deployment.environment=dev,service.namespace=demo,smoke.run_id=${SMOKE_RUN_ID:-manual}
       PORT: "3000"
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
     depends_on:
       otel-collector:
         condition: service_started
+
+  # ---- Optional human dashboard -------------------------------------------
+  # Dashboard is opt-in: `docker compose --profile dashboard up -d`.
+  # The script-first agent interface remains obs/*.sh.
+  grafana:
+    image: grafana/grafana@sha256:e67fa772c14a0c728df61d7ac1b46d0da24e557efa729dbe1c404bf4403d6f35
+    container_name: grafana
+    profiles: ["dashboard"]
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_PLUGINS_PREINSTALL_SYNC: victoriametrics-logs-datasource
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_SECURITY_ADMIN_USER: admin
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    ports:
+      - "127.0.0.1:3001:3000"
+    volumes:
+      - ./grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
+      - ./grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./dashboards:/etc/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    depends_on:
+      victorialogs:
+        condition: service_healthy
+      victoriametrics:
+        condition: service_healthy
+      victoriatraces:
+        condition: service_healthy
 
 volumes:
   victorialogs-data:
   victoriametrics-data:
   victoriatraces-data:
+  grafana-data:

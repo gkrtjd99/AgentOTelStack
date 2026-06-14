@@ -104,8 +104,21 @@ Everything lands in the same stores; filter by service name:
 ./obs/traces.sh services          # see every service currently reporting
 ```
 
+Or use the multi-app helper, which hides the backend-specific field names:
+
+```bash
+./obs/app.sh services
+./obs/app.sh summary my-app
+./obs/app.sh errors my-app 15m 20
+./obs/app.sh metrics my-app
+```
+
 So your laptop ends up with one always-on observability backend that every local
 project reports into — and any agent reads it through `./obs/*.sh` + `AGENTS.md`.
+
+Security boundary: this stack is meant for local development and exposes
+unauthenticated local ports. Do not send secrets or user data in telemetry; read
+[`docs/SECURITY.md`](./SECURITY.md) before remote/shared use.
 
 ---
 
@@ -114,6 +127,10 @@ project reports into — and any agent reads it through `./obs/*.sh` + `AGENTS.m
 ```bash
 make up        # infra only (your apps connect from the host)
 make demo      # also run the bundled sample app, if you want a reference
+make smoke     # verify write/read path end-to-end
+make dashboard # show a terminal overview for sample-app
+make dashboard SERVICE=my-app MODE=compact LOOKBACK=15m
+make grafana   # optional browser dashboard at http://localhost:3001
 make down      # stop
 make clean     # stop + wipe stored telemetry
 ```

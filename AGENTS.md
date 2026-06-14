@@ -13,7 +13,8 @@ You do **not** need any SDK or client library — just `curl` via these wrappers
    `./workload/run.sh` (synthetic load) or `cd e2e && npm test` (browser journey).
 2. **Observe** — query the three signals with `./obs/*.sh` (see below).
 3. **Correlate** — take a `trace_id` from a failing request and run
-   `./obs/correlate.sh <trace_id>` to see its spans + every related log line.
+   `./obs/correlate.sh <trace_id>` to see its spans, every related log line,
+   and a same-service metrics snapshot.
 4. **Reason & change** — edit code under `./app` (or your own service).
 5. **Re-run** — `docker compose up -d --build app` to restart with your change,
    then re-run the workload and compare the metrics. Repeat.
@@ -41,6 +42,9 @@ All scripts default to `localhost`; override with `VL_URL`/`VM_URL`/`VT_URL`.
 | `./obs/metrics.sh '<PromQL>' [range <step>]` | metrics | `./obs/metrics.sh 'sum by (outcome) (orders_processed_total)'` |
 | `./obs/traces.sh <subcmd> ...` | traces | `./obs/traces.sh search-errors sample-app` |
 | `./obs/correlate.sh <traceID>` | all three | `./obs/correlate.sh 7f3a2b...` |
+| `./obs/app.sh <subcmd> ...` | multi-app helper | `./obs/app.sh summary sample-app` |
+| `./obs/overview.sh [--compact\|--json] [--lookback 15m] [service]` | terminal dashboard | `./obs/overview.sh --compact sample-app` |
+| `make grafana` | browser dashboard | `http://localhost:3001` |
 
 Common starting queries:
 
@@ -59,6 +63,12 @@ Common starting queries:
 
 # Drill into one failing request end-to-end
 ./obs/correlate.sh <trace_id-from-a-log-or-trace>
+
+# Multi-app summary / terminal dashboard
+./obs/app.sh services
+./obs/app.sh summary sample-app
+./obs/overview.sh --compact --lookback 15m sample-app
+./obs/overview.sh --json --since 15m sample-app
 ```
 
 ## Making a change and verifying it
@@ -76,12 +86,16 @@ docker compose up -d --build app
 
 # 4. confirm the error rate dropped
 ./obs/metrics.sh 'sum(rate(orders_processed_total{outcome="error"}[1m]))'
+
+# Optional: run the full write/read path smoke test
+make smoke
 ```
 
 ## Conventions for agents
 
 - **Always correlate before concluding.** A metric tells you *that* something is
-  wrong; a trace + its logs tell you *where*. Use `correlate.sh`.
+  wrong; a trace + its logs tell you *where*. Use `correlate.sh`; it also prints
+  a same-service metrics snapshot for context.
 - **Logs carry `trace_id`/`span_id`** (auto-injected by OTel) — pivot on them.
 - **Log level field is `severity_text`** (`info`/`warn`/`error`), not `level`.
 - **Don't guess time ranges** — LogQL uses `_time:5m`/`_time:1h` filters; PromQL
@@ -100,3 +114,4 @@ docker compose up -d --build app
 | VictoriaLogs | 9428 | LogQL query API |
 | VictoriaMetrics | 8428 | PromQL query API |
 | VictoriaTraces | 10428 | Jaeger query API |
+| Grafana | 3001 | Optional dashboard profile (`make grafana`) |
