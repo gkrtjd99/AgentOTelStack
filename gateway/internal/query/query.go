@@ -10,7 +10,11 @@ import (
 
 var serviceRE = regexp.MustCompile(`^[[:print:]]{1,128}$`)
 var traceRE = regexp.MustCompile(`^[0-9a-f]{32}$`)
-var projectRE = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$`)
+
+// Project identity is a UUIDv4 contract.  Accepting other UUID versions would
+// let values that cannot be produced by the runtime identity generator pass
+// the Gateway boundary.
+var projectRE = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$`)
 var allowedLookback = map[string]time.Duration{"5m": 5 * time.Minute, "15m": 15 * time.Minute, "1h": time.Hour, "6h": 6 * time.Hour, "24h": 24 * time.Hour}
 
 func ValidateService(s string) error {

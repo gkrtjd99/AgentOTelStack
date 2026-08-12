@@ -1,6 +1,7 @@
 package query
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -20,25 +21,43 @@ var (
 	ErrBackendResponse = fmt.Errorf("backend_error")
 )
 
+type BackendHTTPError struct {
+	StatusCode int
+}
+
+func (e BackendHTTPError) Error() string { return fmt.Sprintf("backend status %d", e.StatusCode) }
+
 type Client struct {
 	Logs, Metrics, Traces string
 	HTTP                  *http.Client
 }
 
-func (c Client) client() *http.Client {
-	base := c.HTTP
+var defaultHTTPClient = &http.Client{
+	Timeout: 8 * time.Second,
+	CheckRedirect: func(*http.Request, []*http.Request) error {
+		return http.ErrUseLastResponse
+	},
+}
+
+// NewHTTPClient creates the single redirect-safe client used by a Gateway
+// query client.  Callers that provide a custom transport should construct it
+// once at startup rather than cloning an http.Client for every request.
+func NewHTTPClient(base *http.Client) *http.Client {
 	if base == nil {
-		base = &http.Client{Timeout: 8 * time.Second}
+		return defaultHTTPClient
 	}
-	// Backend responses are telemetry, not a redirect authority. Clone the
-	// caller's client so custom transports/timeouts remain useful while a
-	// redirect can never move a query (or credentials added by a transport) to
-	// another host.
 	client := *base
 	client.CheckRedirect = func(*http.Request, []*http.Request) error {
 		return http.ErrUseLastResponse
 	}
 	return &client
+}
+
+func (c Client) client() *http.Client {
+	if c.HTTP != nil {
+		return c.HTTP
+	}
+	return defaultHTTPClient
 }
 func decodeBody(r io.Reader) (any, error) {
 	// VictoriaLogs returns either a JSON value or newline-delimited JSON
@@ -51,7 +70,7 @@ func decodeBody(r io.Reader) (any, error) {
 	if len(b) > 2<<20 {
 		return nil, ErrBackendDecode
 	}
-	dec := json.NewDecoder(strings.NewReader(string(b)))
+	dec := json.NewDecoder(bytes.NewReader(b))
 	var first any
 	if err := dec.Decode(&first); err != nil {
 		if err == io.EOF {
@@ -120,7 +139,7 @@ func get(ctx context.Context, c *Client, base, path string, q url.Values) (any, 
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("backend status %d", resp.StatusCode)
+		return nil, BackendHTTPError{StatusCode: resp.StatusCode}
 	}
 	return decodeBody(resp.Body)
 }
@@ -215,8 +234,11 @@ func (c Client) MetricsQueryScoped(ctx context.Context, service, project string,
 		labels = append(labels, `project="`+promLabelEscape(project)+`"`)
 	}
 	selector := `{` + strings.Join(labels, ",") + `}`
-	q := url.Values{"query": []string{"count by (service_name) (" + selector + ")"}, "start": []string{strconv.FormatInt(start.Unix(), 10)}, "end": []string{strconv.FormatInt(end.Unix(), 10)}, "step": []string{step.String()}}
-	v, err := get(ctx, &c, c.Metrics, "/api/v1/query_range", q)
+	// Context is a current metric snapshot, not a time series. An instant
+	// query preserves the service/project aggregation while avoiding the 61
+	// samples emitted by the previous 15-second query_range request.
+	q := url.Values{"query": []string{"count by (service_name) (" + selector + ")"}, "time": []string{strconv.FormatInt(end.Unix(), 10)}}
+	v, err := get(ctx, &c, c.Metrics, "/api/v1/query", q)
 	if err != nil {
 		return nil, err
 	}
@@ -244,8 +266,11 @@ func (c Client) MetricsTraceScoped(ctx context.Context, services []string, proje
 		labels = append(labels, `project="`+promLabelEscape(project)+`"`)
 	}
 	selector := `{` + strings.Join(labels, ",") + `}`
-	q := url.Values{"query": []string{"count by (service_name) (" + selector + ")"}, "start": []string{strconv.FormatInt(start.Unix(), 10)}, "end": []string{strconv.FormatInt(end.Unix(), 10)}, "step": []string{step.String()}}
-	v, err := get(ctx, &c, c.Metrics, "/api/v1/query_range", q)
+	// Correlation attaches a same-service metric snapshot to a trace. The
+	// trace/log lookback remains bounded independently; returning one value at
+	// the end of that window is sufficient and keeps the response compact.
+	q := url.Values{"query": []string{"count by (service_name) (" + selector + ")"}, "time": []string{strconv.FormatInt(end.Unix(), 10)}}
+	v, err := get(ctx, &c, c.Metrics, "/api/v1/query", q)
 	if err != nil {
 		return nil, err
 	}

@@ -1,6 +1,6 @@
 # Local observability stack for AI coding agents (Claude Code / Codex / OpenCode).
 #
-# Flow:  app --OTLP--> otel-collector --fanout--> VictoriaLogs / VictoriaMetrics / VictoriaTraces
+# Flow:  app --authenticated OTLP--> Gateway --OTLP--> collector --fanout--> Victoria stores
 # Agents read telemetry back via the query APIs using the helper scripts in ./obs.
 # The OpenTelemetry Collector fans out all three signals (logs/metrics/traces) natively.
 
@@ -19,7 +19,10 @@ services:
   # ---- Storage: logs -------------------------------------------------------
   victorialogs:
     build: {context: ./backend-health, dockerfile: Dockerfile.victorialogs}
-    image: dev-observability/victorialogs:v1.52.0-health
+    # Keep locally built images distinct for every installed runtime.  A
+    # rollback must select the image built from that runtime's assets instead
+    # of silently reusing a newer image under the same tag.
+    image: dev-observability/victorialogs:v1.52.0-health-${AGENTOTEL_RUNTIME_VERSION:-dev}
     command:
       - -storageDataPath=/vlogs
       - -httpListenAddr=:9428
@@ -35,7 +38,7 @@ services:
   # ---- Storage: metrics ----------------------------------------------------
   victoriametrics:
     build: {context: ./backend-health, dockerfile: Dockerfile.victoriametrics}
-    image: dev-observability/victoriametrics:v1.149.0-health
+    image: dev-observability/victoriametrics:v1.149.0-health-${AGENTOTEL_RUNTIME_VERSION:-dev}
     command:
       - -httpListenAddr=:8428
       - -opentelemetry.usePrometheusNaming=true # nicer metric names from OTLP
@@ -52,7 +55,7 @@ services:
   # ---- Storage: traces -----------------------------------------------------
   victoriatraces:
     build: {context: ./backend-health, dockerfile: Dockerfile.victoriatraces}
-    image: dev-observability/victoriatraces:v0.10.0-health
+    image: dev-observability/victoriatraces:v0.10.0-health-${AGENTOTEL_RUNTIME_VERSION:-dev}
     command:
       - -storageDataPath=/vtraces
       - -httpListenAddr=:10428
@@ -68,7 +71,7 @@ services:
   # ---- Fan-out collector ---------------------------------------------------
   otel-collector:
     build: {context: ./backend-health, dockerfile: Dockerfile.collector}
-    image: dev-observability/otel-collector:v0.158.0-health
+    image: dev-observability/otel-collector:v0.158.0-health-${AGENTOTEL_RUNTIME_VERSION:-dev}
     command: ["--config=/etc/otelcol/config.yaml"]
     volumes:
       - ./otel-collector/config.yaml:/etc/otelcol/config.yaml:ro
@@ -103,8 +106,11 @@ services:
     logging: {driver: json-file, options: {max-size: "10m", max-file: "3"}}
 
   gateway:
-    build: ./gateway
+    build:
+      context: ./gateway
+    image: dev-observability/gateway:${AGENTOTEL_RUNTIME_VERSION:-dev}
     environment:
+      GATEWAY_VERSION: ${AGENTOTEL_RUNTIME_VERSION:-dev}
       GATEWAY_INGEST_TOKEN: ${GATEWAY_INGEST_TOKEN:?set GATEWAY_INGEST_TOKEN}
       GATEWAY_COLLECTOR_URL: http://otel-collector:4318
       GATEWAY_QUERY_TOKEN: ${GATEWAY_QUERY_TOKEN:?set GATEWAY_QUERY_TOKEN}
@@ -126,6 +132,7 @@ services:
   # http://localhost:4318. To run the bundled demo: `docker compose --profile demo up`.
   app:
     build: ./app
+    image: dev-observability/app:${AGENTOTEL_RUNTIME_VERSION:-dev}
     profiles: ["demo"]
     environment:
       OTEL_SERVICE_NAME: sample-app
@@ -137,7 +144,10 @@ services:
       OTEL_EXPORTER_OTLP_HEADERS: Authorization=Bearer%20${GATEWAY_INGEST_TOKEN:?set GATEWAY_INGEST_TOKEN}
       OTEL_METRIC_EXPORT_INTERVAL: "10000" # 10s for demo responsiveness (default 60s)
       OTEL_NODE_RESOURCE_DETECTORS: env,host,os
-      OTEL_RESOURCE_ATTRIBUTES: deployment.environment=dev,service.namespace=demo,agentotel.project.id=${AGENTOTEL_PROJECT_ID:-manual},smoke.run_id=${SMOKE_RUN_ID:-manual}
+      # compose.sh supplies a workspace-scoped UUIDv4 whenever this profile is
+      # selected.  Keep interpolation empty for infra-only operations, which
+      # must remain usable outside a Git checkout.
+      OTEL_RESOURCE_ATTRIBUTES: deployment.environment=dev,service.namespace=demo,agentotel.project.id=${AGENTOTEL_PROJECT_ID:-},smoke.run_id=${SMOKE_RUN_ID:-manual}
       PORT: "3000"
     ports:
       - "127.0.0.1:${APP_HOST_PORT:-3000}:3000"
@@ -154,6 +164,7 @@ services:
     build:
       context: ./grafana
       dockerfile: Dockerfile
+    image: dev-observability/grafana:${AGENTOTEL_RUNTIME_VERSION:-dev}
     profiles: ["dashboard"]
     environment:
       GF_AUTH_ANONYMOUS_ENABLED: "false"

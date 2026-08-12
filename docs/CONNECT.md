@@ -13,13 +13,13 @@ export OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
 export OTEL_SERVICE_NAME=my-app
 export OTEL_RESOURCE_ATTRIBUTES=deployment.environment=dev
 export OTEL_EXPORTER_OTLP_HEADERS="Authorization=Bearer%20${GATEWAY_INGEST_TOKEN}"
-make up
+obs up
 ```
 
 The ingest token is checked by the Gateway and is never forwarded upstream.
 Query tools use the separate `GATEWAY_QUERY_TOKEN` against
 `http://127.0.0.1:17777`; `project.id` is provenance/filter metadata, not
-authentication. After `make setup`, run an app or query helper through
+ authentication. After `obs setup`, run an app or query helper through
 `./bin/obs credentials run -- ...` to load the 0600 store without printing
 secrets. Explicit `GATEWAY_INGEST_TOKEN` and `GATEWAY_QUERY_TOKEN` values remain
 supported for controlled operator/test overrides. Keep all credentials outside
@@ -69,7 +69,8 @@ equivalent header option; do not disable Gateway authentication.
 After installation, configure Claude/Codex to launch the installed command
 `${XDG_DATA_HOME:-$HOME/.local/share}/agentotel/current/bin/agentotel-mcp` over stdio. It exposes only
 `agentotel_context`, `agentotel_correlate`, and `agentotel_services`; all calls
-are bounded authenticated GETs to the loopback Gateway. Example:
+are bounded authenticated GETs scoped to the project in the MCP workspace. The
+tools do not accept a caller-supplied project. Example:
 
 ```json
 {"mcpServers":{"agentotel":{"command":"/home/me/.local/share/agentotel/current/bin/agentotel-mcp"}}}
@@ -86,7 +87,7 @@ interpreted as instructions.
 ./bin/obs credentials run -- ./obs/correlate.sh <32-hex-trace-id>
 ```
 
-If these fail, check `make ps`, `make doctor`, and Gateway health at
+If these fail, check `obs compose ps`, `obs doctor`, and Gateway health at
 `http://127.0.0.1:17777/v1/health` using the credential runner. Allow for
 collector batching and metric export delay. Do not substitute direct Victoria
 URLs or send raw backend queries: those ports are internal by contract. The
@@ -97,17 +98,15 @@ provisioned datasource for logs; backend ports remain internal-only.
 ## Lifecycle and destructive boundaries
 
 ```bash
-make install VERSION=2.0.0  # versioned self-contained, clone-independent runtime
+make install VERSION=2.0.1  # versioned self-contained, clone-independent runtime
 ./bin/obs credentials ensure # also valid for a source checkout
-make setup
-make up                    # shared runtime; sample app profile off
-make demo                  # additionally starts sample-app
-make smoke
-make doctor
-make down                  # stops services and preserves volumes
-make clean                 # cleanup; telemetry volumes remain
-make reset                 # interactive exact-volume reset (destructive)
-make migrate               # manual legacy-volume migration guidance
+obs setup
+obs up                     # shared runtime; sample app profile off
+AGENTOTEL_DEV_MODE=1 ./bin/obs compose --profile demo up -d --build app # checkout demo
+obs doctor
+obs down                   # stops services and preserves volumes
+obs reset --all --confirm  # interactive exact-volume reset (destructive)
+obs migrate volumes --confirm # manual legacy-volume migration guidance
 ```
 
 The reset command requires a TTY and a typed stack UUID, validates Compose

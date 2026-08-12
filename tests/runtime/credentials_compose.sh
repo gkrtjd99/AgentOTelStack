@@ -4,6 +4,19 @@ root=$(CDPATH=; cd -- "$(dirname "$0")/../.." && pwd)
 t=$(mktemp -d); trap 'rm -rf "$t"' EXIT
 export HOME="$t/home" XDG_DATA_HOME="$t/data" XDG_BIN_HOME="$t/bin" XDG_CONFIG_HOME="$t/config" XDG_STATE_HOME="$t/state" XDG_RUNTIME_DIR="$t/run"
 mkdir -p "$HOME" "$t/fake"
+
+cat >"$t/credential-child" <<'EOF'
+#!/bin/sh
+env | grep -E '^(GATEWAY_|GF_SECURITY_)' | sort
+EOF
+chmod 755 "$t/credential-child"
+GATEWAY_INGEST_TOKEN=caller-ingest GATEWAY_QUERY_TOKEN=caller-query GF_SECURITY_ADMIN_PASSWORD=caller-grafana \
+  "$root/libexec/agentotel/credentials.sh" run -- "$t/credential-child" >"$t/credential-child.env"
+grep -q '^GATEWAY_QUERY_TOKEN=caller-query$' "$t/credential-child.env"
+if grep -Eq '^(GATEWAY_INGEST_TOKEN|GF_SECURITY_ADMIN_PASSWORD)=' "$t/credential-child.env"; then
+  echo 'query credential runner leaked non-query credentials' >&2
+  exit 1
+fi
 launcher_case="$t/launcher-case"
 mkdir -p "$launcher_case/bin"
 ln -s "$launcher_case/target" "$launcher_case/bin/obs"
@@ -27,7 +40,7 @@ for location in config data state runtime; do
   esac
   mkdir -p "$xdg_home"
   ln -s "$t/real-$location" "$xdg_home/agentotel"
-  if env HOME="$t/home" XDG_CONFIG_HOME="$t/mkdirs-config-$location" XDG_DATA_HOME="$t/mkdirs-data-$location" XDG_STATE_HOME="$t/mkdirs-state-$location" XDG_RUNTIME_DIR="$t/mkdirs-runtime-$location" "$xdg_var=$xdg_home" "$root/bin/obs" credentials status >"$t/mkdirs-$location.out" 2>&1; then
+  if env AGENTOTEL_DEV_MODE=1 HOME="$t/home" XDG_CONFIG_HOME="$t/mkdirs-config-$location" XDG_DATA_HOME="$t/mkdirs-data-$location" XDG_STATE_HOME="$t/mkdirs-state-$location" XDG_RUNTIME_DIR="$t/mkdirs-runtime-$location" "$xdg_var=$xdg_home" "$root/bin/obs" credentials status >"$t/mkdirs-$location.out" 2>&1; then
     echo "mkdirs must reject $location symlink" >&2
     exit 1
   fi

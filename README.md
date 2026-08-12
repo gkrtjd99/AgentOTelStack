@@ -32,7 +32,7 @@ back through the query scripts on the authenticated query port `:17777`.
 flowchart LR
   subgraph Apps["Apps that emit OTLP"]
     Own["Your local app<br/>OTEL_SERVICE_NAME=my-app"]
-    Demo["Bundled sample-app<br/>make demo only"]
+    Demo["Bundled sample-app<br/>checkout demo command only"]
   end
 
   Gateway["Gateway<br/>ingest :4318 / query :17777"]
@@ -122,7 +122,7 @@ So instead of "I think I fixed it", you say **"error rate 18.7% → 0%"**.
 
 > Actual run results, not claims.
 
-Booted the full stack with `make demo`, drove load with `./workload/run.sh 150`,
+Booted the full stack with the checkout demo command, drove load with `./workload/run.sh 150`,
 then queried all four tools:
 
 | Check | Result |
@@ -154,7 +154,7 @@ Reproduce in [Reproduce](#reproduce).
 ### Current install, MCP, and safety contract
 
 Install a self-contained, versioned runtime from a clone with `make install
-VERSION=2.0.0`. It lives at `~/.local/share/agentotel/2.0.0` (or the XDG data
+VERSION=2.0.1`. It lives at `~/.local/share/agentotel/2.0.1` (or the XDG data
 directory), with `current` and `previous` pointers; `~/.local/bin/obs runtime
 rollback` returns to the previous version. Launchers use the installed assets,
 not the clone, so the checkout may be moved or removed. Credentials are created
@@ -171,13 +171,13 @@ arbitrary URL or write telemetry. Configure the installed binary at
 keep the config pointer/credentials private. See
 [`docs/CONNECT.md`](./docs/CONNECT.md) and [`docs/SECURITY.md`](./docs/SECURITY.md).
 
-Safe lifecycle: run `make setup`, then `make up`; use `./bin/obs doctor` and
-`./bin/obs storage` for read-only health/storage checks. `make clean` preserves
-telemetry volumes. Only `./bin/obs reset --all --confirm` is destructive, and it
+Safe lifecycle: run `obs setup`, then `obs up`; use `obs doctor` and
+`obs storage` for read-only health/storage checks. `obs down` preserves
+telemetry volumes. Only `obs reset --all --confirm` is destructive, and it
 requires a TTY plus exact stack-UUID, Compose-project, and volume-identity
 guards. If `doctor` or `storage` reports `migration_required`, legacy or
 mismatched volumes are not deleted or relabeled automatically: stop, back up,
-copy, and verify them using the manual flow from `make migrate`.
+copy, and verify them using the manual flow from `obs migrate volumes --confirm`.
 
 The optional Grafana profile bakes the VictoriaLogs datasource plugin v0.31.0
 with a pinned checksum and uses local authentication. Current upstream Grafana
@@ -187,14 +187,15 @@ findings have only the narrow, time-bounded waivers in
 ### Quick start
 
 **Want to attach your own app?** → **[docs/CONNECT.md](./docs/CONNECT.md)**. Summary:
-`make up` (infra only), then send your app to `http://localhost:4318` with
+`obs up` (infra only), then send your app to the authenticated Gateway at
+`http://localhost:4318` with an ingest bearer token and
 `OTEL_SERVICE_NAME=my-app`.
 
 **Just want the self-contained demo?**
 
 ```bash
 # 1. Start infra + bundled sample app
-make demo           # authenticated runtime + bundled demo
+AGENTOTEL_DEV_MODE=1 ./bin/obs compose --profile demo up -d --build # authenticated runtime + bundled demo
 
 # 2. Generate traffic
 ./workload/run.sh 300
@@ -208,26 +209,26 @@ make demo           # authenticated runtime + bundled demo
 cd e2e && npm install && npm run install-browsers && npm test
 
 # 5. (optional) run the automated smoke test / terminal dashboard
-make smoke
-make dashboard SERVICE=sample-app
-make dashboard SERVICE=sample-app MODE=compact LOOKBACK=15m
+./bin/obs credentials run -- ./scripts/smoke.sh 120
+AGENTOTEL_DEV_MODE=1 ./bin/obs credentials run -- ./obs/overview.sh sample-app
+AGENTOTEL_DEV_MODE=1 ./bin/obs credentials run -- ./obs/overview.sh --compact --lookback 15m sample-app
 ./bin/obs credentials run -- ./obs/overview.sh --json --since 15m sample-app
 
 # 6. (optional) browser dashboard
-make grafana
+AGENTOTEL_DEV_MODE=1 ./bin/obs compose --profile dashboard up -d grafana
 ```
 
 Sample app UI: <http://localhost:3000>. Optional Grafana UI:
 <http://localhost:3001>, with the `ObservabilityStack / Local Observability`
 dashboard provisioned automatically.
 
-> `make up` starts the shared Gateway + collector + 3 stores (plus queue init) — the
-> bring-your-own-app default. `make demo` adds the bundled sample app.
+> `obs up` starts the shared Gateway + collector + 3 stores (plus queue init) — the
+> bring-your-own-app default. The checkout demo command above adds the bundled sample app.
 
 ### Reproduce
 
 ```bash
-make demo                                  # full stack
+AGENTOTEL_DEV_MODE=1 ./bin/obs compose --profile demo up -d --build # full stack
 ./workload/run.sh 150                       # load (~10% intentional failures)
 sleep 12                                    # wait for metric export interval (10s)
 
@@ -252,10 +253,10 @@ backend that every project *points at*. Two layers:
 
 | Layer | Lives where | What you do |
 |---|---|---|
-| Backend (one copy) | installed runtime | Run `make setup` then `make up` for the Gateway + collector + queue init + Victoria stores. |
+| Backend (one copy) | installed runtime | Run `obs setup` then `obs up` for the Gateway + collector + queue init + Victoria stores. |
 | Per app (tiny) | Each project folder | Set 4 env vars; Node apps may add one `otel.js`; emit OTLP to `:4318`. |
 
-Use `make demo` when you also want the bundled `sample-app` on `:3000`.
+Use the checkout demo command above when you also want the bundled `sample-app` on `:3000`.
 
 **Layer 2 — the only per-app footprint.** Set the Gateway endpoint, bearer
 token, service name, and resource attributes, then run your app:
@@ -293,7 +294,7 @@ Multiple apps? They all land in the same stores; filter by service name:
 | `otel-collector/config.yaml` | OTLP receive → fan-out to the 3 stores |
 | `app/` | **Swappable** sample service (Node + explicit OTel bootstrap + lockfile). Replace with your own. |
 | `obs/` | Agent query tools using the authenticated Gateway: bounded logs/metrics/traces/correlation helpers |
-| `scripts/smoke.sh` | End-to-end write/read path verification (`make smoke`) |
+| `scripts/smoke.sh` | End-to-end write/read path verification |
 | `dashboards/local-observability.json` | Optional Grafana dashboard provisioned by the `dashboard` profile |
 | `grafana/provisioning/` | Grafana Metrics, VictoriaLogs, and Traces provisioning |
 | `.github/workflows/ci.yml` | Static validation, npm audit, and Docker smoke test |
@@ -314,13 +315,13 @@ Multiple apps? They all land in the same stores; filter by service name:
 | Gateway | 4318 / 17777 | authenticated OTLP/HTTP ingest / query API |
 | otel-collector | internal | fan-out only; no host port |
 | VictoriaLogs/Metrics/Traces | internal | backend APIs; no host ports |
-| Grafana | 3001 | Optional browser dashboard (`make grafana`) |
+| Grafana | 3001 | Optional browser dashboard |
 
 ### Teardown
 
 ```bash
-make down          # stop (telemetry preserved in volumes)
-make reset             # interactive UUID/project/volume-guarded exact reset
+obs down            # stop (telemetry preserved in volumes)
+obs reset --all --confirm # interactive UUID/project/volume-guarded exact reset
 ```
 
 ### Further reading
@@ -342,14 +343,14 @@ make reset             # interactive UUID/project/volume-guarded exact reset
 
 ### 아키텍처
 
-왼쪽에서 오른쪽으로 보면 됩니다. 앱은 컬렉터로 텔레메트리를 쓰고, 에이전트는 조회
-스크립트로 다시 읽습니다.
+왼쪽에서 오른쪽으로 보면 됩니다. 앱은 인증된 Gateway로 텔레메트리를 쓰고,
+에이전트는 조회 스크립트로 다시 읽습니다.
 
 ```mermaid
 flowchart LR
   subgraph Apps["OTLP를 보내는 앱"]
     Own["내 로컬 앱<br/>OTEL_SERVICE_NAME=my-app"]
-    Demo["번들 sample-app<br/>make demo일 때만"]
+    Demo["번들 sample-app<br/>checkout demo 명령일 때만"]
   end
 
   Gateway["Gateway<br/>ingest :4318 / query :17777"]
@@ -438,7 +439,7 @@ flowchart TD
 
 > 아래는 실제 실행 결과입니다(주장 아님).
 
-`make demo`로 풀스택을 띄우고 `./workload/run.sh 150`으로 부하를 준 뒤 네 도구를 모두 조회:
+checkout demo 명령으로 풀스택을 띄우고 `./workload/run.sh 150`으로 부하를 준 뒤 네 도구를 모두 조회:
 
 | 검증 항목 | 결과 |
 |---|---|
@@ -465,14 +466,14 @@ flowchart TD
 ### Quick start
 
 **내 앱을 붙이려면?** → **[docs/CONNECT.md](./docs/CONNECT.md)**. 요약:
-`make up`(인프라만) 후 내 앱을 `http://localhost:4318`로 보내고
-`OTEL_SERVICE_NAME=my-app` 지정.
+`obs up`(인프라만) 후 내 앱을 ingest bearer token과 함께 인증된
+`http://localhost:4318` Gateway로 보내고 `OTEL_SERVICE_NAME=my-app` 지정.
 
 **자체 완결 데모만 보고 싶다면:**
 
 ```bash
 # 1. 인프라 + 번들 샘플 앱 기동
-make demo           # 인증된 런타임 + 번들 demo
+AGENTOTEL_DEV_MODE=1 ./bin/obs compose --profile demo up -d --build # 인증된 런타임 + 번들 demo
 
 # 2. 트래픽 생성
 ./workload/run.sh 300
@@ -486,26 +487,26 @@ make demo           # 인증된 런타임 + 번들 demo
 cd e2e && npm install && npm run install-browsers && npm test
 
 # 5. (선택) 자동 smoke test / 터미널 대시보드
-make smoke
-make dashboard SERVICE=sample-app
-make dashboard SERVICE=sample-app MODE=compact LOOKBACK=15m
+./bin/obs credentials run -- ./scripts/smoke.sh 120
+AGENTOTEL_DEV_MODE=1 ./bin/obs credentials run -- ./obs/overview.sh sample-app
+AGENTOTEL_DEV_MODE=1 ./bin/obs credentials run -- ./obs/overview.sh --compact --lookback 15m sample-app
 ./bin/obs credentials run -- ./obs/overview.sh --json --since 15m sample-app
 
 # 6. (선택) 브라우저 대시보드
-make grafana
+AGENTOTEL_DEV_MODE=1 ./bin/obs compose --profile dashboard up -d grafana
 ```
 
 샘플 앱 UI: <http://localhost:3000>. 선택형 Grafana UI:
 <http://localhost:3001>. `ObservabilityStack / Local Observability` 대시보드가
 자동 provision됩니다.
 
-> `make up`은 **공유 Gateway/collector/저장소 런타임**을 띄웁니다 — bring-your-own-app
-> 기본값. `make demo`는 여기에 샘플 앱을 더합니다.
+> `obs up`은 **공유 Gateway/collector/저장소 런타임**을 띄웁니다 — bring-your-own-app
+> 기본값. 위의 checkout demo 명령은 여기에 샘플 앱을 더합니다.
 
 ### 현재 설치·MCP·안전 계약
 
-클론에서 `make install VERSION=2.0.0`으로 자체 완결 버전 런타임을 설치합니다.
-`~/.local/share/agentotel/2.0.0`(또는 XDG 데이터 디렉터리)에 저장되고
+클론에서 `make install VERSION=2.0.1`으로 자체 완결 버전 런타임을 설치합니다.
+`~/.local/share/agentotel/2.0.1`(또는 XDG 데이터 디렉터리)에 저장되고
 `current`/`previous` 포인터가 생깁니다. `~/.local/bin/obs runtime rollback`으로
 이전 버전으로 되돌릴 수 있습니다. 실행 파일은 클론이 아닌 설치된 자산을
 사용하므로 클론을 옮기거나 삭제해도 됩니다. 자격 증명은 제한된 권한으로
@@ -520,12 +521,12 @@ bounded 쿼리를 인증된 Gateway로만 보내며 임의 URL 선택이나 tele
 config 포인터와 자격 증명을 보호하세요. [연결 문서](./docs/CONNECT.md)와
 [보안 문서](./docs/SECURITY.md)를 참고하세요.
 
-안전한 수명주기는 `make setup` 후 `make up`입니다. 읽기 전용 점검은
-`./bin/obs doctor`, `./bin/obs storage`를 사용하세요. `make clean`은 telemetry
-볼륨을 보존합니다. 파괴 작업은 `./bin/obs reset --all --confirm` 하나뿐이며
+안전한 수명주기는 `obs setup` 후 `obs up`입니다. 읽기 전용 점검은
+`obs doctor`, `obs storage`를 사용하세요. `obs down`은 telemetry
+볼륨을 보존합니다. 파괴 작업은 `obs reset --all --confirm` 하나뿐이며
 TTY와 정확한 stack UUID·Compose project·volume identity 검사를 요구합니다.
 `migration_required`가 나오면 legacy/mismatched 볼륨을 자동 삭제하거나
-relabel하지 않습니다. `make migrate`가 안내하는 수동 백업·복사·검증 절차를
+relabel하지 않습니다. `obs migrate volumes --confirm`이 안내하는 수동 백업·복사·검증 절차를
 따르세요.
 
 선택형 Grafana 프로필은 VictoriaLogs datasource plugin v0.31.0을 고정
@@ -536,7 +537,7 @@ Grafana 취약점은 [제한적이고 기간이 정해진 waiver](./security/gra
 ### 검증 재현
 
 ```bash
-make demo                                  # 풀스택 기동
+AGENTOTEL_DEV_MODE=1 ./bin/obs compose --profile demo up -d --build # 풀스택 기동
 ./workload/run.sh 150                       # 부하 (약 10%는 의도적 실패)
 sleep 12                                    # 메트릭 export 주기(10s) 대기
 
@@ -561,10 +562,10 @@ correlate 출력에서 `GET /api/checkout` 스팬의 `http.status_code=500`.
 
 | 층 | 위치 | 할 일 |
 |---|---|---|
-| 백엔드 (1개만) | `~/AgentOTelStack/` | `make up`으로 Gateway + 내부 collector/Victoria 저장소를 실행 |
+| 백엔드 (1개만) | 설치된 런타임 | `obs setup` 후 `obs up`으로 Gateway + 내부 collector/Victoria 저장소를 실행 |
 | 앱마다 (아주 작음) | 각 프로젝트 폴더 | Gateway endpoint/token 등 env 설정; `:4318`로 OTLP/HTTP 송신 |
 
-번들 `sample-app`(`:3000`)까지 같이 보려면 `make demo`를 씁니다.
+번들 `sample-app`(`:3000`)까지 같이 보려면 위의 checkout demo 명령을 씁니다.
 
 **층2 — 앱마다 생기는 것은 이것뿐.** Gateway endpoint/token 등 env를 설정하고 앱을 실행:
 
@@ -601,7 +602,7 @@ export OTEL_EXPORTER_OTLP_HEADERS="Authorization=Bearer%20${GATEWAY_INGEST_TOKEN
 | `otel-collector/config.yaml` | OTLP 수신 → 3종 저장소로 fan-out |
 | `app/` | **교체 가능한** 샘플 서비스 (Node + 명시적 OTel bootstrap + lockfile). 내 앱으로 바꿔 관측. |
 | `obs/` | 인증된 Gateway를 사용하는 bounded logs/metrics/traces/correlation helper |
-| `scripts/smoke.sh` | write/read path 자동 검증 (`make smoke`) |
+| `scripts/smoke.sh` | write/read path 자동 검증 |
 | `dashboards/local-observability.json` | `dashboard` profile로 provision되는 선택형 Grafana dashboard |
 | `grafana/provisioning/` | Grafana datasource와 dashboard provider provisioning |
 | `.github/workflows/ci.yml` | 정적 검증, npm audit, Docker smoke test |
@@ -622,13 +623,13 @@ export OTEL_EXPORTER_OTLP_HEADERS="Authorization=Bearer%20${GATEWAY_INGEST_TOKEN
 | Gateway | 4318 / 17777 | 인증된 OTLP/HTTP 수신 / 조회 API |
 | otel-collector | 내부 | fan-out 전용, 호스트 포트 없음 |
 | VictoriaLogs/Metrics/Traces | 내부 | 백엔드 API, 호스트 포트 없음 |
-| Grafana | 3001 | 선택형 브라우저 대시보드 (`make grafana`) |
+| Grafana | 3001 | 선택형 브라우저 대시보드 |
 
 ### 종료
 
 ```bash
-make down          # 정지 (텔레메트리는 볼륨에 보존)
-make reset             # 대화형 UUID/project/volume 검증 exact-volume reset
+obs down            # 정지 (텔레메트리는 볼륨에 보존)
+obs reset --all --confirm # 대화형 UUID/project/volume 검증 exact-volume reset
 ```
 
 ### 더 보기

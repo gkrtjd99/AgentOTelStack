@@ -1,6 +1,9 @@
 package correlation
 
-import "testing"
+import (
+	"strconv"
+	"testing"
+)
 
 func TestDecodeCrossProjectAndFailures(t *testing.T) {
 	raw := map[string]any{"data": []any{map[string]any{
@@ -57,6 +60,37 @@ func TestDecodeCompletenessIndicators(t *testing.T) {
 		map[string]any{"spanID": "child", "startTime": float64(1), "references": []any{map[string]any{"spanID": "missing", "refType": "CHILD_OF"}}}}}}})
 	if !has(r.Indicators, "broken_parent_ref") {
 		t.Fatalf("expected broken_parent_ref: %#v", r.Indicators)
+	}
+}
+
+func TestDecodeDoesNotInventUnknownProject(t *testing.T) {
+	raw := map[string]any{"data": []any{map[string]any{
+		"spans":     []any{map[string]any{"spanID": "span", "startTime": float64(1), "duration": float64(1), "processID": "p1"}},
+		"processes": map[string]any{"p1": map[string]any{"serviceName": "api"}},
+	}}}
+	r := Decode("0123456789abcdef0123456789abcdef", raw)
+	if len(r.Projects) != 0 || r.Spans[0].Project != "" {
+		t.Fatalf("invented project: projects=%#v span=%#v", r.Projects, r.Spans[0])
+	}
+}
+
+func BenchmarkDecodeCorrelation2000Spans(b *testing.B) {
+	spans := make([]any, 2000)
+	for i := range spans {
+		span := map[string]any{
+			"spanID":    strconv.Itoa(i),
+			"startTime": float64(i + 1),
+			"duration":  float64(1),
+		}
+		if i > 0 {
+			span["references"] = []any{map[string]any{"refType": "CHILD_OF", "spanID": strconv.Itoa(i - 1)}}
+		}
+		spans[i] = span
+	}
+	raw := map[string]any{"data": []any{map[string]any{"spans": spans, "processes": map[string]any{}}}}
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		Decode("0123456789abcdef0123456789abcdef", raw)
 	}
 }
 

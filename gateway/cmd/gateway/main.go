@@ -4,6 +4,7 @@ import (
 	"agentotelstack/gateway/internal/query"
 	"agentotelstack/gateway/internal/query/correlation"
 	"agentotelstack/gateway/internal/status"
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"crypto/subtle"
@@ -16,8 +17,10 @@ import (
 	"os"
 	"os/signal"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 )
@@ -31,6 +34,19 @@ const (
 )
 
 var ingestPaths = []string{"/v1/traces", "/v1/metrics", "/v1/logs"}
+
+// Injected by the container build; direct local builds identify themselves as
+// dev rather than advertising a stale release.
+var buildVersion = "dev"
+
+func gatewayVersion() string { return envOr("GATEWAY_VERSION", buildVersion) }
+
+var forwardHTTPClient = &http.Client{
+	Transport: http.DefaultTransport,
+	CheckRedirect: func(*http.Request, []*http.Request) error {
+		return http.ErrUseLastResponse
+	},
+}
 
 type config struct {
 	token              string
@@ -128,7 +144,7 @@ func main() {
 	for _, path := range ingestPaths {
 		mux.Handle(path, ingest(c, sem, path))
 	}
-	qc := query.Client{Logs: envOr("GATEWAY_LOGS_URL", "http://victorialogs:9428"), Metrics: envOr("GATEWAY_METRICS_URL", "http://victoriametrics:8428"), Traces: envOr("GATEWAY_TRACES_URL", "http://victoriatraces:10428")}
+	qc := query.Client{Logs: envOr("GATEWAY_LOGS_URL", "http://victorialogs:9428"), Metrics: envOr("GATEWAY_METRICS_URL", "http://victoriametrics:8428"), Traces: envOr("GATEWAY_TRACES_URL", "http://victoriatraces:10428"), HTTP: query.NewHTTPClient(nil)}
 	for _, backend := range []string{qc.Logs, qc.Metrics, qc.Traces} {
 		u, e := url.Parse(backend)
 		if e != nil || u.Scheme != "http" || u.Host == "" || u.Path != "" || u.RawQuery != "" || u.Fragment != "" {
@@ -151,7 +167,7 @@ func main() {
 		queryMux.HandleFunc(p, queryHandler(qcfg, p))
 	}
 	queryMux.HandleFunc("/v1/health", queryHealth(qcfg))
-	queryMux.HandleFunc("/v1/version", version)
+	queryMux.HandleFunc("/v1/version", queryVersion)
 	queryServer := &http.Server{Addr: "0.0.0.0:17777", Handler: limitHeaders(queryMux), ReadHeaderTimeout: 2 * time.Second, ReadTimeout: requestLimit, WriteTimeout: requestLimit}
 	go func() {
 		log.Printf("gateway listening on %s", server.Addr)
@@ -314,44 +330,96 @@ func queryHandler(c config, path string) http.HandlerFunc {
 		start := end.Add(-lb)
 		switch path {
 		case "/v1/services":
-			v, e := retry(ctx, func() (any, error) { return c.query.Services(ctx) })
-			add("traces", v, e)
+			if in.Project == "" {
+				v, e := retry(ctx, func() (any, error) { return c.query.Services(ctx) })
+				add("traces", v, e)
+				break
+			}
+			results := runBackendQueries(ctx, []backendQuery{
+				{name: "logs", fn: func(ctx context.Context) (any, error) {
+					return retry(ctx, func() (any, error) { return c.query.LogsQueryScoped(ctx, "", in.Project, start, end, 500) })
+				}},
+				{name: "metrics", fn: func(ctx context.Context) (any, error) {
+					return retry(ctx, func() (any, error) {
+						return c.query.MetricsQueryScoped(ctx, "", in.Project, start, end, 15*time.Second)
+					})
+				}},
+			})
+			services := map[string]struct{}{}
+			for _, result := range results {
+				add(result.name, result.value, result.err)
+				if result.err == nil {
+					collectServiceNames(result.value, services)
+				}
+			}
+			names := make([]string, 0, len(services))
+			for name := range services {
+				names = append(names, name)
+			}
+			sort.Strings(names)
+			data["services"] = names
 		case "/v1/errors":
-			v, e := retry(ctx, func() (any, error) {
-				return c.query.LogsErrorsScoped(ctx, in.Service, in.Project, start, end, in.Limit)
+			results := runBackendQueries(ctx, []backendQuery{
+				{name: "logs", fn: func(ctx context.Context) (any, error) {
+					return retry(ctx, func() (any, error) {
+						return c.query.LogsErrorsScoped(ctx, in.Service, in.Project, start, end, in.Limit)
+					})
+				}},
+				{name: "traces", fn: func(ctx context.Context) (any, error) {
+					return retry(ctx, func() (any, error) { return c.query.TracesQueryScoped(ctx, in.Service, in.Project, in.Limit) })
+				}},
 			})
-			add("logs", v, e)
-			v, e = retry(ctx, func() (any, error) { return c.query.TracesQueryScoped(ctx, in.Service, in.Project, in.Limit) })
-			add("traces", v, e)
+			for _, result := range results {
+				add(result.name, result.value, result.err)
+			}
 		case "/v1/context":
-			v, e := retry(ctx, func() (any, error) { return c.query.LogsQueryScoped(ctx, in.Service, in.Project, start, end, in.Limit) })
-			add("logs", v, e)
-			v, e = retry(ctx, func() (any, error) {
-				return c.query.MetricsQueryScoped(ctx, in.Service, in.Project, start, end, 15*time.Second)
+			results := runBackendQueries(ctx, []backendQuery{
+				{name: "logs", fn: func(ctx context.Context) (any, error) {
+					return retry(ctx, func() (any, error) { return c.query.LogsQueryScoped(ctx, in.Service, in.Project, start, end, in.Limit) })
+				}},
+				{name: "metrics", fn: func(ctx context.Context) (any, error) {
+					return retry(ctx, func() (any, error) {
+						return c.query.MetricsQueryScoped(ctx, in.Service, in.Project, start, end, 15*time.Second)
+					})
+				}},
 			})
-			add("metrics", v, e)
+			for _, result := range results {
+				add(result.name, result.value, result.err)
+			}
 		case "/v1/correlate":
 			v, e := retry(ctx, func() (any, error) { return c.query.TraceQueryScoped(ctx, in.TraceID, in.Project) })
 			if e == nil {
 				r := correlation.Decode(in.TraceID, v)
-				ls, le := traceWindow(v, start, end)
-				lv, le2 := retry(ctx, func() (any, error) { return c.query.LogsTraceScoped(ctx, in.TraceID, in.Project, ls, le, in.Limit) })
-				if le2 == nil {
-					r.Logs = project(lv)
-					backs = append(backs, status.Backend{Name: "logs", Status: "ok"})
-				} else {
-					backs = append(backs, status.Backend{Name: "logs", Status: backendStatus(le2), Error: safeError(le2)})
-					r.Indicators = append(r.Indicators, "signal_not_observed")
+				ls, le := start, end
+				if !r.StartTime.IsZero() && !r.EndTime.IsZero() {
+					ls, le = r.StartTime.Add(-2*time.Minute), r.EndTime.Add(2*time.Minute)
 				}
-				mv, me := retry(ctx, func() (any, error) {
-					return c.query.MetricsTraceScoped(ctx, r.Services, in.Project, ls, le, 15*time.Second)
+				results := runBackendQueries(ctx, []backendQuery{
+					{name: "logs", fn: func(ctx context.Context) (any, error) {
+						return retry(ctx, func() (any, error) { return c.query.LogsTraceScoped(ctx, in.TraceID, in.Project, ls, le, in.Limit) })
+					}},
+					{name: "metrics", fn: func(ctx context.Context) (any, error) {
+						return retry(ctx, func() (any, error) {
+							return c.query.MetricsTraceScoped(ctx, r.Services, in.Project, ls, le, 15*time.Second)
+						})
+					}},
 				})
-				if me == nil {
-					r.Metrics = project(mv)
-					backs = append(backs, status.Backend{Name: "metrics", Status: "ok"})
-				} else {
-					backs = append(backs, status.Backend{Name: "metrics", Status: backendStatus(me), Error: safeError(me)})
-					r.Indicators = append(r.Indicators, "metrics_unavailable")
+				for _, result := range results {
+					if result.err == nil {
+						if result.name == "logs" {
+							r.Logs = project(result.value)
+						} else {
+							r.Metrics = project(result.value)
+						}
+						backs = append(backs, status.Backend{Name: result.name, Status: "ok"})
+						continue
+					}
+					backs = append(backs, status.Backend{Name: result.name, Status: backendStatus(result.err), Error: safeError(result.err)})
+					if result.name == "logs" {
+						r.Indicators = append(r.Indicators, "signal_not_observed")
+					} else {
+						r.Indicators = append(r.Indicators, "metrics_unavailable")
+					}
 				}
 				data["correlation"] = r
 				backs = append(backs, status.Backend{Name: "traces", Status: "ok"})
@@ -369,7 +437,64 @@ func queryHandler(c config, path string) http.HandlerFunc {
 	}
 }
 
+func collectServiceNames(v any, out map[string]struct{}) {
+	switch x := v.(type) {
+	case []any:
+		for _, item := range x {
+			collectServiceNames(item, out)
+		}
+	case map[string]any:
+		for key, value := range x {
+			if key == "service" || key == "service_name" || key == "service.name" {
+				if name, ok := value.(string); ok && query.ValidateService(name) == nil {
+					out[name] = struct{}{}
+				}
+			}
+			collectServiceNames(value, out)
+		}
+	}
+}
+
+type backendQuery struct {
+	name string
+	fn   func(context.Context) (any, error)
+}
+
+type backendResult struct {
+	name  string
+	value any
+	err   error
+}
+
+// runBackendQueries starts all independent backend calls before waiting for
+// any result. Results are written back by input index so response ordering is
+// deterministic even though completion order is not.
+func runBackendQueries(ctx context.Context, queries []backendQuery) []backendResult {
+	results := make([]backendResult, len(queries))
+	var wg sync.WaitGroup
+	wg.Add(len(queries))
+	for i, backend := range queries {
+		i, backend := i, backend
+		go func() {
+			defer wg.Done()
+			value, err := backend.fn(ctx)
+			results[i] = backendResult{name: backend.name, value: value, err: err}
+		}()
+	}
+	wg.Wait()
+	return results
+}
+
 var ansiRE = regexp.MustCompile(`[\x00-\x1f\x7f-\x9f\x1b]`)
+
+var projectionKeys = map[string]struct{}{
+	"data": {}, "items": {}, "traceid": {}, "trace_id": {}, "spanid": {}, "span_id": {},
+	"operationname": {}, "operation": {}, "starttime": {}, "start_time": {}, "duration": {},
+	"duration_ms": {}, "processid": {}, "process_id": {}, "references": {}, "spans": {},
+	"processes": {}, "service": {}, "service_name": {}, "status": {}, "status_code": {},
+	"severity_text": {}, "message": {}, "time": {}, "timestamp": {}, "metric": {}, "value": {},
+	"values": {}, "result": {}, "resulttype": {}, "type": {}, "name": {},
+}
 
 func clean(s string) string { return ansiRE.ReplaceAllString(strings.ToValidUTF8(s, "�"), "") }
 func project(v any) any {
@@ -385,8 +510,7 @@ func project(v any) any {
 		out := map[string]any{}
 		for k, val := range x {
 			lk := strings.ToLower(k)
-			allowed := map[string]bool{"data": true, "items": true, "traceid": true, "trace_id": true, "spanid": true, "span_id": true, "operationname": true, "operation": true, "starttime": true, "start_time": true, "duration": true, "duration_ms": true, "processid": true, "process_id": true, "references": true, "spans": true, "processes": true, "service": true, "service_name": true, "status": true, "status_code": true, "severity_text": true, "message": true, "time": true, "timestamp": true, "metric": true, "value": true, "values": true, "result": true, "resulttype": true, "type": true, "name": true}
-			if !allowed[lk] || strings.Contains(lk, "query") || strings.Contains(lk, "prompt") || strings.Contains(lk, "secret") || strings.Contains(lk, "token") || strings.Contains(lk, "password") || strings.Contains(lk, "body") || strings.Contains(lk, "sql") || strings.Contains(lk, "url") {
+			if _, allowed := projectionKeys[lk]; !allowed || strings.Contains(lk, "query") || strings.Contains(lk, "prompt") || strings.Contains(lk, "secret") || strings.Contains(lk, "token") || strings.Contains(lk, "password") || strings.Contains(lk, "body") || strings.Contains(lk, "sql") || strings.Contains(lk, "url") {
 				continue
 			}
 			out[clean(k)] = project(val)
@@ -397,14 +521,15 @@ func project(v any) any {
 	}
 }
 func retry(ctx context.Context, fn func() (any, error)) (any, error) {
-	var v any
-	var e error
-	for i := 0; i < 2; i++ {
-		v, e = fn()
+	for attempt := 0; attempt < 2; attempt++ {
+		v, e := fn()
 		if e == nil {
 			return v, nil
 		}
-		t := time.NewTimer(time.Duration(i+1) * 20 * time.Millisecond)
+		if attempt == 1 || !retryable(e) {
+			return nil, e
+		}
+		t := time.NewTimer(20 * time.Millisecond)
 		select {
 		case <-ctx.Done():
 			t.Stop()
@@ -412,7 +537,23 @@ func retry(ctx context.Context, fn func() (any, error)) (any, error) {
 		case <-t.C:
 		}
 	}
-	return v, e
+	panic("unreachable")
+}
+
+func retryable(err error) bool {
+	var backendErr query.BackendHTTPError
+	if errors.As(err, &backendErr) {
+		return backendErr.StatusCode == http.StatusTooManyRequests || backendErr.StatusCode == http.StatusBadGateway || backendErr.StatusCode == http.StatusServiceUnavailable || backendErr.StatusCode == http.StatusGatewayTimeout
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	var netErr interface {
+		error
+		Timeout() bool
+		Temporary() bool
+	}
+	return errors.As(err, &netErr) && (netErr.Timeout() || netErr.Temporary())
 }
 func backendStatus(e error) string {
 	if errors.Is(e, query.ErrTraceNotStored) {
@@ -431,47 +572,6 @@ func backendStatus(e error) string {
 		return "timeout"
 	}
 	return "backend_unavailable"
-}
-func traceWindow(v any, fallbackStart, fallbackEnd time.Time) (time.Time, time.Time) {
-	minT, maxT := time.Time{}, time.Time{}
-	var walk func(any)
-	walk = func(x any) {
-		switch z := x.(type) {
-		case map[string]any:
-			for k, vv := range z {
-				lk := strings.ToLower(k)
-				if lk == "starttime" || lk == "start_time" {
-					if n, ok := vv.(float64); ok {
-						t := time.Unix(0, int64(n)*1000)
-						if minT.IsZero() || t.Before(minT) {
-							minT = t
-						}
-						if maxT.IsZero() || t.After(maxT) {
-							maxT = t
-						}
-					}
-				}
-				if lk == "duration" {
-					if n, ok := vv.(float64); ok && !minT.IsZero() {
-						t := minT.Add(time.Duration(n) * time.Microsecond)
-						if t.After(maxT) {
-							maxT = t
-						}
-					}
-				}
-				walk(vv)
-			}
-		case []any:
-			for _, vv := range z {
-				walk(vv)
-			}
-		}
-	}
-	walk(v)
-	if minT.IsZero() {
-		return fallbackStart.Add(-2 * time.Minute), fallbackEnd.Add(2 * time.Minute)
-	}
-	return minT.Add(-2 * time.Minute), maxT.Add(2 * time.Minute)
 }
 func safeError(e error) string {
 	msg := clean(e.Error())
@@ -583,7 +683,7 @@ func handleIngest(c config, sem chan struct{}, path string, w http.ResponseWrite
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), requestLimit)
 	defer cancel()
-	forward, err := http.NewRequestWithContext(ctx, http.MethodPost, c.upstream+path, strings.NewReader(string(body)))
+	forward, err := http.NewRequestWithContext(ctx, http.MethodPost, c.upstream+path, bytes.NewReader(body))
 	if err != nil {
 		writeErr(w, http.StatusBadGateway)
 		return http.StatusBadGateway
@@ -594,11 +694,7 @@ func handleIngest(c config, sem chan struct{}, path string, w http.ResponseWrite
 	// OTLP forwarding is a write operation and must never follow a redirect to
 	// an untrusted host. In particular, following a 307 could disclose the
 	// complete telemetry body to the redirect target.
-	forwardClient := *http.DefaultClient
-	forwardClient.CheckRedirect = func(*http.Request, []*http.Request) error {
-		return http.ErrUseLastResponse
-	}
-	resp, err := forwardClient.Do(forward)
+	resp, err := forwardHTTPClient.Do(forward)
 	if err != nil {
 		if ctx.Err() != nil {
 			writeErr(w, http.StatusGatewayTimeout)
@@ -618,16 +714,27 @@ func handleIngest(c config, sem chan struct{}, path string, w http.ResponseWrite
 }
 
 func version(w http.ResponseWriter, r *http.Request) {
+	writeVersion(w, r, []string{"ingest", "version", "health"}, true)
+}
+
+func queryVersion(w http.ResponseWriter, r *http.Request) {
+	writeVersion(w, r, []string{"context", "errors", "correlate", "services"}, false)
+}
+
+func writeVersion(w http.ResponseWriter, r *http.Request, capabilities []string, includeIngest bool) {
 	if r.Method != http.MethodGet {
 		writeErr(w, http.StatusMethodNotAllowed)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]interface{}{
-		"schema_version": "1.0", "gateway_version": "2.0.0", "api_min": "1.0", "api_max": "1.0",
-		"capabilities": []string{"ingest", "version", "health"},
-		"ingest":       map[string]interface{}{"paths": ingestPaths, "content_type": "application/x-protobuf", "max_body_bytes": maxBody, "max_header_bytes": maxHeaderSize},
-	})
+	body := map[string]interface{}{
+		"schema_version": "1.0", "gateway_version": gatewayVersion(), "api_min": "1.0", "api_max": "1.0",
+		"capabilities": capabilities,
+	}
+	if includeIngest {
+		body["ingest"] = map[string]interface{}{"paths": ingestPaths, "content_type": "application/x-protobuf", "max_body_bytes": maxBody, "max_header_bytes": maxHeaderSize}
+	}
+	_ = json.NewEncoder(w).Encode(body)
 }
 
 func health(w http.ResponseWriter, r *http.Request) {

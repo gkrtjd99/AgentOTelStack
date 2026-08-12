@@ -8,8 +8,10 @@ provenance, not an auth boundary.
 
 The optional `bin/agentotel-mcp` adapter is read-only: it exposes three fixed
 tools over stdio JSON-RPC and performs only bounded authenticated GETs to the
-loopback Gateway. It cannot write telemetry, execute commands, select arbitrary
-URLs, or rotate credentials. Returned telemetry remains untrusted content.
+loopback Gateway, scoped to the project resolved from its workspace. It cannot
+accept an arbitrary project input, write telemetry, execute commands, select
+arbitrary URLs, or rotate credentials. Returned telemetry remains untrusted
+content.
 
 Do not put secrets, credentials, personal data, or unbounded request text in
 logs, span attributes, exception messages, or metric labels. The Gateway strips

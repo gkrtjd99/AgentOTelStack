@@ -83,11 +83,11 @@ func TestLogsErrorsAndTracesCarryErrorAndScopePredicates(t *testing.T) {
 	defer s.Close()
 	c := Client{Logs: s.URL, Traces: s.URL}
 	start, end := time.Unix(1700000000, 0), time.Unix(1700000060, 0)
-	project := "123e4567-e89b-12d3-a456-426614174000"
+	project := "123e4567-e89b-42d3-a456-426614174000"
 	if _, err := c.LogsErrorsScoped(tContext(), "checkout", project, start, end, 25); err != nil {
 		t.Fatal(err)
 	}
-	if got := logQuery.Get("query"); got != `severity_text:"error" service.name:"checkout" project:"123e4567-e89b-12d3-a456-426614174000"` {
+	if got := logQuery.Get("query"); got != `severity_text:"error" service.name:"checkout" project:"123e4567-e89b-42d3-a456-426614174000"` {
 		t.Fatalf("error log query = %q", got)
 	}
 	if _, err := c.TracesQueryScoped(tContext(), "checkout", project, 25); err != nil {
@@ -103,18 +103,26 @@ func TestLogsErrorsAndTracesCarryErrorAndScopePredicates(t *testing.T) {
 }
 
 func TestMetricsQueryScopedEscapesAndFiltersProject(t *testing.T) {
-	var got string
+	var gotPath string
+	var got url.Values
 	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		got = r.URL.Query().Get("query")
-		fmt.Fprint(w, `{"status":"success","data":{"resultType":"matrix","result":[{"metric":{"service_name":"api"},"values":[[1,"1"]]}]}}`)
+		gotPath = r.URL.Path
+		got = r.URL.Query()
+		fmt.Fprint(w, `{"status":"success","data":{"resultType":"vector","result":[{"metric":{"service_name":"api"},"value":[1700000060,"1"]}]}}`)
 	}))
 	defer s.Close()
 	if _, err := (Client{Metrics: s.URL}).MetricsQueryScoped(tContext(), "api", "project\"\\name", time.Unix(1700000000, 0), time.Unix(1700000060, 0), time.Second); err != nil {
 		t.Fatal(err)
 	}
 	want := `project="project\"\\name"`
-	if !strings.Contains(got, want) {
-		t.Fatalf("project selector = %q, want escaped %q", got, want)
+	if gotPath != "/api/v1/query" {
+		t.Fatalf("metrics path = %q, want instant query", gotPath)
+	}
+	if got.Get("time") != "1700000060" || got.Get("start") != "" || got.Get("end") != "" || got.Get("step") != "" {
+		t.Fatalf("instant query params = %#v", got)
+	}
+	if !strings.Contains(got.Get("query"), want) {
+		t.Fatalf("project selector = %q, want escaped %q", got.Get("query"), want)
 	}
 }
 
@@ -159,15 +167,15 @@ func TestCorrelateScopedLogsAndMetricsCarryProject(t *testing.T) {
 		case "/select/logsql/query":
 			logQuery = r.URL.Query().Get("query")
 			fmt.Fprint(w, `[{"trace_id":"abc"}]`)
-		case "/api/v1/query_range":
+		case "/api/v1/query":
 			metricsQuery = r.URL.Query().Get("query")
-			fmt.Fprint(w, `{"status":"success","data":{"resultType":"matrix","result":[{"metric":{"service_name":"api"},"values":[[1,"1"]]}]}}`)
+			fmt.Fprint(w, `{"status":"success","data":{"resultType":"vector","result":[{"metric":{"service_name":"api"},"value":[1700000060,"1"]}]}}`)
 		default:
 			http.NotFound(w, r)
 		}
 	}))
 	defer s.Close()
-	project := "123e4567-e89b-12d3-a456-426614174000"
+	project := "123e4567-e89b-42d3-a456-426614174000"
 	start, end := time.Unix(1700000000, 0), time.Unix(1700000060, 0)
 	c := Client{Logs: s.URL, Metrics: s.URL}
 	if _, err := c.LogsTraceScoped(tContext(), "0123456789abcdef0123456789abcdef", project, start, end, 10); err != nil {
@@ -195,7 +203,7 @@ func TestTrace404IsNotStored(t *testing.T) {
 
 func TestTraceQueryScopedFiltersMixedProjectProcessesAndSpans(t *testing.T) {
 	id := "0123456789abcdef0123456789abcdef"
-	fixture := `{"data":[{"spans":[{"spanID":"a-root","operationName":"root","startTime":1000000,"duration":1000,"processID":"p-a"},{"spanID":"a-child","operationName":"child","startTime":1001000,"duration":100,"processID":"p-a","references":[{"refType":"CHILD_OF","spanID":"a-root"}]},{"spanID":"b-root","operationName":"other","startTime":1000000,"duration":1000,"processID":"p-b"}],"processes":{"p-a":{"serviceName":"api","tags":[{"key":"project","value":"123e4567-e89b-12d3-a456-426614174000"}]},"p-b":{"serviceName":"worker","tags":[{"key":"project","value":"223e4567-e89b-12d3-a456-426614174000"}]}}}]}`
+	fixture := `{"data":[{"spans":[{"spanID":"a-root","operationName":"root","startTime":1000000,"duration":1000,"processID":"p-a"},{"spanID":"a-child","operationName":"child","startTime":1001000,"duration":100,"processID":"p-a","references":[{"refType":"CHILD_OF","spanID":"a-root"}]},{"spanID":"b-root","operationName":"other","startTime":1000000,"duration":1000,"processID":"p-b"}],"processes":{"p-a":{"serviceName":"api","tags":[{"key":"project","value":"123e4567-e89b-42d3-a456-426614174000"}]},"p-b":{"serviceName":"worker","tags":[{"key":"project","value":"223e4567-e89b-42d3-a456-426614174000"}]}}}]}`
 	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/select/jaeger/api/traces/"+id {
 			http.NotFound(w, r)
@@ -205,7 +213,7 @@ func TestTraceQueryScopedFiltersMixedProjectProcessesAndSpans(t *testing.T) {
 	}))
 	defer s.Close()
 	c := Client{Traces: s.URL}
-	raw, err := c.TraceQueryScoped(tContext(), id, "123e4567-e89b-12d3-a456-426614174000")
+	raw, err := c.TraceQueryScoped(tContext(), id, "123e4567-e89b-42d3-a456-426614174000")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -218,7 +226,7 @@ func TestTraceQueryScopedFiltersMixedProjectProcessesAndSpans(t *testing.T) {
 	if len(processes) != 1 || processes["p-a"] == nil || processes["p-b"] != nil {
 		t.Fatalf("scoped processes = %#v", processes)
 	}
-	if _, err := c.TraceQueryScoped(tContext(), id, "323e4567-e89b-12d3-a456-426614174000"); err != ErrNoData {
+	if _, err := c.TraceQueryScoped(tContext(), id, "323e4567-e89b-42d3-a456-426614174000"); err != ErrNoData {
 		t.Fatalf("wrong project err = %v, want ErrNoData", err)
 	}
 }

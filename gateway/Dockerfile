@@ -3,7 +3,7 @@ WORKDIR /src
 COPY go.mod ./
 COPY cmd ./cmd
 COPY internal ./internal
-RUN CGO_ENABLED=0 go build -o /gateway ./cmd/gateway
+RUN CGO_ENABLED=0 go build -trimpath -o /gateway ./cmd/gateway
 FROM alpine:3.22@sha256:14358309a308569c32bdc37e2e0e9694be33a9d99e68afb0f5ff33cc1f695dce
 COPY --from=build /gateway /gateway
 USER 65532:65532

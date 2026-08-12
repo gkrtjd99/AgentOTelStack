@@ -10,8 +10,10 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -20,7 +22,7 @@ const maxBody = 2 << 20
 
 var traceRE = regexp.MustCompile(`^[0-9a-f]{32}$`)
 var serviceRE = regexp.MustCompile(`^[A-Za-z0-9._-]{1,128}$`)
-var uuidRE = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$`)
+var uuidRE = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`)
 
 type request struct {
 	JSONRPC string          `json:"jsonrpc"`
@@ -47,8 +49,15 @@ type callResult struct {
 var initialized bool
 var gatewayBaseURL = "http://127.0.0.1:17777"
 var gatewayHTTPClient = http.DefaultClient
+var buildVersion = "dev"
+var workspaceProject string
+var workspaceProjectErr error
 
 func main() {
+	if err := initWorkspaceProject(); err != nil {
+		fmt.Fprintln(os.Stderr, "agentotel-mcp:", err)
+		os.Exit(2)
+	}
 	s := bufio.NewScanner(os.Stdin)
 	s.Buffer(make([]byte, 4096), 4<<20)
 	for s.Scan() {
@@ -109,7 +118,7 @@ func handle(q request) response {
 	r := response{JSONRPC: "2.0", ID: q.ID}
 	switch q.Method {
 	case "initialize":
-		r.Result = map[string]any{"protocolVersion": "2025-06-18", "capabilities": map[string]any{"tools": map[string]any{}}, "serverInfo": map[string]any{"name": "agentotel-mcp", "version": "2.0.0"}}
+		r.Result = map[string]any{"protocolVersion": "2025-06-18", "capabilities": map[string]any{"tools": map[string]any{}}, "serverInfo": map[string]any{"name": "agentotel-mcp", "version": buildVersion}}
 	case "ping":
 		r.Result = map[string]any{}
 	case "tools/list":
@@ -133,18 +142,16 @@ func handle(q request) response {
 }
 func errResp(r response, c int, m string) response { r.Error = &rpcError{c, m}; return r }
 func tools() []map[string]any {
-	return []map[string]any{{"name": "agentotel_context", "description": "Read service telemetry context", "inputSchema": map[string]any{"type": "object", "required": []string{"service"}, "additionalProperties": false, "properties": map[string]any{"service": map[string]any{"type": "string"}, "project": map[string]any{"type": "string", "format": "uuid"}, "lookback": map[string]any{"type": "string", "enum": []string{"5m", "15m", "1h", "6h", "24h"}}, "limit": map[string]any{"type": "integer", "minimum": 1, "maximum": 500}}}}, {"name": "agentotel_correlate", "description": "Read a trace correlation", "inputSchema": map[string]any{"type": "object", "required": []string{"trace_id"}, "additionalProperties": false, "properties": map[string]any{"trace_id": map[string]any{"type": "string", "pattern": "^[0-9a-f]{32}$"}, "project": map[string]any{"type": "string", "format": "uuid"}, "limit": map[string]any{"type": "integer", "minimum": 1, "maximum": 500}}}}, {"name": "agentotel_services", "description": "List observed services", "inputSchema": map[string]any{"type": "object", "additionalProperties": false}}}
+	return []map[string]any{{"name": "agentotel_context", "description": "Read service telemetry context for this workspace", "inputSchema": map[string]any{"type": "object", "required": []string{"service"}, "additionalProperties": false, "properties": map[string]any{"service": map[string]any{"type": "string"}, "lookback": map[string]any{"type": "string", "enum": []string{"5m", "15m", "1h", "6h", "24h"}}, "limit": map[string]any{"type": "integer", "minimum": 1, "maximum": 500}}}}, {"name": "agentotel_correlate", "description": "Read a trace correlation for this workspace", "inputSchema": map[string]any{"type": "object", "required": []string{"trace_id"}, "additionalProperties": false, "properties": map[string]any{"trace_id": map[string]any{"type": "string", "pattern": "^[0-9a-f]{32}$"}, "limit": map[string]any{"type": "integer", "minimum": 1, "maximum": 500}}}}, {"name": "agentotel_services", "description": "List observed services for this workspace", "inputSchema": map[string]any{"type": "object", "additionalProperties": false}}}
 }
 
 type contextArgs struct {
 	Service  string `json:"service"`
-	Project  string `json:"project,omitempty"`
 	Lookback string `json:"lookback,omitempty"`
 	Limit    int    `json:"limit,omitempty"`
 }
 type correlateArgs struct {
 	TraceID string `json:"trace_id"`
-	Project string `json:"project,omitempty"`
 	Limit   int    `json:"limit,omitempty"`
 }
 
@@ -164,6 +171,9 @@ func strict(raw json.RawMessage, v any) error {
 	return nil
 }
 func call(raw json.RawMessage) callResult {
+	if err := initWorkspaceProject(); err != nil {
+		return fail("workspace project unavailable")
+	}
 	var c struct {
 		Name      string          `json:"name"`
 		Arguments json.RawMessage `json:"arguments"`
@@ -179,29 +189,29 @@ func call(raw json.RawMessage) callResult {
 		if err := validateContext(a); err != nil {
 			return fail(err.Error())
 		}
-		return gateway(c.Name, a.Service, a.Project, a.Lookback, a.Limit)
+		return contextCall(a)
 	}
 	if c.Name == "agentotel_correlate" {
 		var a correlateArgs
 		if err := strict(c.Arguments, &a); err != nil {
 			return fail(err.Error())
 		}
-		if !traceRE.MatchString(a.TraceID) || (a.Project != "" && !uuidRE.MatchString(a.Project)) || a.Limit < 0 || a.Limit > 500 {
+		if !traceRE.MatchString(a.TraceID) || a.Limit < 0 || a.Limit > 500 {
 			return fail("invalid arguments")
 		}
-		return gateway(c.Name, a.TraceID, a.Project, "", a.Limit)
+		return correlateCall(a)
 	}
 	if c.Name == "agentotel_services" {
 		var a map[string]any
 		if err := strict(c.Arguments, &a); err != nil || len(a) > 0 {
 			return fail("invalid arguments")
 		}
-		return gateway(c.Name, "", "", "", 0)
+		return servicesCall()
 	}
 	return fail("unknown tool")
 }
 func validateContext(a contextArgs) error {
-	if !serviceRE.MatchString(a.Service) || (a.Project != "" && !uuidRE.MatchString(a.Project)) || (a.Lookback != "" && !map[string]bool{"5m": true, "15m": true, "1h": true, "6h": true, "24h": true}[a.Lookback]) || a.Limit < 0 || a.Limit > 500 {
+	if !serviceRE.MatchString(a.Service) || (a.Lookback != "" && !map[string]bool{"5m": true, "15m": true, "1h": true, "6h": true, "24h": true}[a.Lookback]) || a.Limit < 0 || a.Limit > 500 {
 		return errors.New("invalid arguments")
 	}
 	return nil
@@ -209,16 +219,42 @@ func validateContext(a contextArgs) error {
 func fail(s string) callResult {
 	return callResult{Content: []map[string]string{{"type": "text", "text": s}}, IsError: true}
 }
-func gateway(name, a, p, l string, n int) callResult {
-	path := "/v1/" + strings.TrimPrefix(name, "agentotel_")
-	q := url.Values{}
-	for k, v := range map[string]string{"service": a, "project": p, "lookback": l} {
-		if v != "" {
-			q.Set(k, v)
-		}
+func contextCall(a contextArgs) callResult {
+	q := url.Values{"service": []string{a.Service}}
+	addWorkspaceProject(q)
+	if a.Lookback != "" {
+		q.Set("lookback", a.Lookback)
 	}
-	if n > 0 {
-		q.Set("limit", fmt.Sprint(n))
+	if a.Limit > 0 {
+		q.Set("limit", strconv.Itoa(a.Limit))
+	}
+	return callGateway("/v1/context", q)
+}
+
+func correlateCall(a correlateArgs) callResult {
+	q := url.Values{"trace_id": []string{a.TraceID}}
+	addWorkspaceProject(q)
+	if a.Limit > 0 {
+		q.Set("limit", strconv.Itoa(a.Limit))
+	}
+	return callGateway("/v1/correlate", q)
+}
+
+func servicesCall() callResult {
+	q := url.Values{}
+	addWorkspaceProject(q)
+	return callGateway("/v1/services", q)
+}
+
+func addWorkspaceProject(q url.Values) {
+	if workspaceProjectErr == nil && workspaceProject != "" {
+		q.Set("project", workspaceProject)
+	}
+}
+
+func callGateway(path string, q url.Values) callResult {
+	if workspaceProjectErr != nil || workspaceProject == "" {
+		return fail("workspace project unavailable")
 	}
 	b, e := get(path, q.Encode())
 	if e != nil {
@@ -228,7 +264,116 @@ func gateway(name, a, p, l string, n int) callResult {
 	if json.Unmarshal(b, &obj) != nil || obj == nil {
 		return fail("invalid gateway response")
 	}
-	return callResult{Content: []map[string]string{{"type": "text", "text": string(b)}}, StructuredContent: obj}
+	return callResult{Content: []map[string]string{{"type": "text", "text": summarize(obj)}}, StructuredContent: obj}
+}
+
+func summarize(obj map[string]any) string {
+	partial, _ := obj["partial"].(bool)
+	spans := countArrays(obj, "spans")
+	failures := countArrays(obj, "failures")
+	items := countArrays(obj, "items")
+	if spans > 0 || failures > 0 {
+		return fmt.Sprintf("correlation complete: spans=%d failures=%d partial=%t", spans, failures, partial)
+	}
+	if items > 0 {
+		return fmt.Sprintf("telemetry response: items=%d partial=%t", items, partial)
+	}
+	return fmt.Sprintf("telemetry response: partial=%t", partial)
+}
+
+func countArrays(v any, key string) int {
+	count := 0
+	switch x := v.(type) {
+	case map[string]any:
+		for k, value := range x {
+			if k == key {
+				if values, ok := value.([]any); ok {
+					count += len(values)
+				}
+			}
+			count += countArrays(value, key)
+		}
+	case []any:
+		for _, value := range x {
+			count += countArrays(value, key)
+		}
+	}
+	return count
+}
+
+func initWorkspaceProject() error {
+	if workspaceProject != "" || workspaceProjectErr != nil {
+		return workspaceProjectErr
+	}
+	if id := os.Getenv("AGENTOTEL_PROJECT_ID"); id != "" {
+		if !uuidRE.MatchString(id) {
+			workspaceProjectErr = errors.New("invalid AGENTOTEL_PROJECT_ID")
+			return workspaceProjectErr
+		}
+		workspaceProject = id
+		return nil
+	}
+	root, err := gitRoot()
+	if err != nil {
+		workspaceProjectErr = errors.New("not in a git workspace")
+		return workspaceProjectErr
+	}
+	id, err := readWorkspaceProject(root)
+	if err != nil {
+		workspaceProjectErr = err
+		return err
+	}
+	workspaceProject = id
+	return nil
+}
+
+func gitRoot() (string, error) {
+	out, err := exec.Command("git", "rev-parse", "--show-toplevel").Output()
+	if err != nil {
+		return "", err
+	}
+	root := strings.TrimSpace(string(out))
+	if root == "" || filepath.IsAbs(root) == false {
+		return "", errors.New("invalid git root")
+	}
+	return root, nil
+}
+
+func readWorkspaceProject(root string) (string, error) {
+	path := filepath.Join(root, ".agentotel", "project.toml")
+	st, err := os.Lstat(path)
+	if err != nil || st.Mode()&os.ModeSymlink != 0 || !st.Mode().IsRegular() {
+		return "", errors.New("project is not initialized")
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return "", errors.New("project is not readable")
+	}
+	var schema, id string
+	for _, line := range strings.Split(string(b), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		switch {
+		case strings.HasPrefix(line, "schema = "):
+			if schema != "" || line != "schema = 1" {
+				return "", errors.New("invalid project.toml")
+			}
+			schema = "1"
+		case strings.HasPrefix(line, "project_id = "):
+			if id != "" || len(line) < len("project_id = \"\"")+1 || line[len(line)-1] != '"' || !strings.HasPrefix(line, "project_id = \"") {
+				return "", errors.New("invalid project.toml")
+			}
+			id = strings.TrimSuffix(strings.TrimPrefix(line, "project_id = \""), "\"")
+		default:
+			return "", errors.New("invalid project.toml")
+		}
+	}
+	if schema != "1" || !uuidRE.MatchString(id) {
+		return "", errors.New("invalid project.toml")
+	}
+	return id, nil
 }
 func get(path, q string) ([]byte, error) {
 	t, e := cred()

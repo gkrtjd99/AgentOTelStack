@@ -1,7 +1,15 @@
 #!/bin/sh
 . "$(dirname "$0")/common.sh"
 . "$(dirname "$0")/volumes.sh"
-json=${AGENTOTEL_JSON:-0}; root=${AGENTOTEL_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}; gw=${GATEWAY_URL:-http://127.0.0.1:17777}; token=${GATEWAY_QUERY_TOKEN:-dev-query-token}; curl_bin=${AGENTOTEL_CURL_CMD:-curl}
+if ! volume_inventory_load; then
+  if [ "${AGENTOTEL_JSON:-0}" = 1 ]; then
+    printf '%s\n' '{"status":"unavailable","check":"volumes","reason":"unable to inspect Docker volume inventory"}'
+  else
+    printf '%s\n' 'storage: unavailable (unable to inspect Docker volume inventory)'
+  fi
+  exit 2
+fi
+json=${AGENTOTEL_JSON:-0}; root=${AGENTOTEL_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}; gw=${GATEWAY_URL:-http://127.0.0.1:17777}; load_query_credential; token=$GATEWAY_QUERY_TOKEN; curl_bin=${AGENTOTEL_CURL_CMD:-curl}
 case "${1:-storage}" in
  storage|disk)
    legacy=$(legacy_volume_list)
@@ -22,21 +30,54 @@ case "${1:-storage}" in
    [ "$canary_status" = ok ] || { rc=1; [ "$canary_status" = no_data ] && rc=2; [ "$json" = 1 ] && printf '{"status":"%s","check":"canary"}\n' "$canary_status" || printf 'canary: %s\n' "$canary_status"; exit "$rc"; }
    if [ "$json" = 1 ]; then printf '{"status":"ok","check":"canary","health":%s,"services":%s}\n' "$(printf '%s' "$health" | jq -c .)" "$(printf '%s' "$services" | jq -c .)"; else printf 'canary: ok (gateway health and services query)\n'; fi; exit 0;;
  *) die 'invalid storage command';; esac
-df_tool=${AGENTOTEL_DF_CMD:-df}; used=$($df_tool -Pk "$root" | awk 'NR==2{print $3}'); avail=$($df_tool -Pk "$root" | awk 'NR==2{print $4}');
+df_tool=${AGENTOTEL_DF_CMD:-df}; df_snapshot=$($df_tool -Pk "$root"); used=$(printf '%s\n' "$df_snapshot" | awk 'NR==2{print $3}'); avail=$(printf '%s\n' "$df_snapshot" | awk 'NR==2{print $4}');
 case "$used:$avail" in *[!0-9:]*|:*) used=0; avail=0;; esac
 total=$((used+avail)); pct=0; [ "$total" -gt 0 ] && pct=$((used*100/total)); status=ok; [ "$pct" -ge 80 ] && status=warn; [ "$pct" -ge 90 ] && status=critical
 
 # Observability is deliberately obtained from the Gateway's fixed, projected
 # endpoints.  This keeps backend query syntax and credentials out of the CLI.
-service=${AGENTOTEL_SERVICE:-sample-app}; ctx=$($curl_bin -fsS -H "Authorization: Bearer $token" --get "$gw/v1/context" --data-urlencode "service=$service" --data-urlencode 'lookback=15m' --data-urlencode 'limit=500' 2>/dev/null || true)
-err=$($curl_bin -fsS -H "Authorization: Bearer $token" --get "$gw/v1/errors" --data-urlencode "service=$service" --data-urlencode 'lookback=15m' --data-urlencode 'limit=500' 2>/dev/null || true)
-signal_status() { [ -z "$1" ] && { printf 'unavailable'; return; }; printf '%s' "$1" | jq -e 'type == "object" and (.partial == true or (.data != null))' >/dev/null 2>&1 || { printf 'unavailable'; return; }; printf '%s' "$1" | jq -e '.partial == true' >/dev/null 2>&1 && { printf 'unavailable'; return; }; printf '%s' "$1" | jq -e '(.data | (type == "array" and length > 0) or (type == "object" and length > 0))' >/dev/null 2>&1 && printf 'ok' || printf 'no_data'; }
-cs=$(signal_status "$ctx"); es=$(signal_status "$err")
-series=null; logs=null; traces=null; spans=null
-[ "$cs" = ok ] && series=$(printf '%s' "$ctx" | jq '(.data.metrics.data.result // .data.metrics.result // []) | length' 2>/dev/null || printf null)
-[ "$es" = ok ] && logs=$(printf '%s' "$err" | jq '(.data.logs.data? // .data.logs.result? // .data.logs? // []) | map((.service_name // "unknown") | tostring) | unique | length' 2>/dev/null || printf null)
-[ "$es" = ok ] && traces=$(printf '%s' "$err" | jq '(.data.traces.data? // .data.traces.result? // .data.traces? // []) | map((.service_name // "unknown") | tostring) | unique | length' 2>/dev/null || printf null)
-[ "$es" = ok ] && spans=$(printf '%s' "$err" | jq '(.data.traces.data? // .data.traces.result? // .data.traces? // []) | map(.spans // []) | add // [] | map((.name // .span_name // "unknown") | tostring) | unique | length' 2>/dev/null || printf null)
+service=${AGENTOTEL_SERVICE:-sample-app}
+storage_tmp=$(mktemp -d "${TMPDIR:-/tmp}/agentotel-storage.XXXXXX") || { printf '%s\n' 'storage: unable to create temporary directory' >&2; exit 2; }
+trap 'rm -rf "$storage_tmp"' EXIT HUP INT TERM
+ctx_rc=0; err_rc=0
+$curl_bin -fsS -H "Authorization: Bearer $token" --get "$gw/v1/context" --data-urlencode "service=$service" --data-urlencode 'lookback=15m' --data-urlencode 'limit=500' >"$storage_tmp/context" 2>/dev/null & ctx_pid=$!
+$curl_bin -fsS -H "Authorization: Bearer $token" --get "$gw/v1/errors" --data-urlencode "service=$service" --data-urlencode 'lookback=15m' --data-urlencode 'limit=500' >"$storage_tmp/errors" 2>/dev/null & err_pid=$!
+wait "$ctx_pid" || ctx_rc=$?
+wait "$err_pid" || err_rc=$?
+
+# Decode each envelope once. The compact status/count records preserve the
+# previous signal_status semantics while avoiding repeated jq processes and
+# keeping malformed/partial responses unavailable.
+ctx_stats='unavailable:null'
+[ "$ctx_rc" -eq 0 ] && ctx_stats=$(jq -r '
+  if (type != "object" or .partial == true or .data == null) then
+    "unavailable:null"
+  elif (((.data | type) == "array" and (.data | length) > 0) or
+        ((.data | type) == "object" and (.data | length) > 0)) then
+    ((.data.metrics.data.result // .data.metrics.result // []) | length) as $series |
+    "ok:\($series)"
+  else "no_data:0" end
+' "$storage_tmp/context" 2>/dev/null || printf '%s' 'unavailable:null')
+err_stats='unavailable:null:null:null'
+[ "$err_rc" -eq 0 ] && err_stats=$(jq -r '
+  if (type != "object" or .partial == true or .data == null) then
+    "unavailable:null:null:null"
+  elif (((.data | type) == "array" and (.data | length) > 0) or
+        ((.data | type) == "object" and (.data | length) > 0)) then
+    ((.data.logs.data? // .data.logs.result? // .data.logs? // []) |
+      map((.service_name // "unknown") | tostring) | unique | length) as $logs |
+    ((.data.traces.data? // .data.traces.result? // .data.traces? // []) |
+      map((.service_name // "unknown") | tostring) | unique | length) as $traces |
+    ((.data.traces.data? // .data.traces.result? // .data.traces? // []) |
+      map(.spans // []) | add // [] |
+      map((.name // .span_name // "unknown") | tostring) | unique | length) as $spans |
+    "ok:\($logs):\($traces):\($spans)"
+  else "no_data:0:0:0" end
+' "$storage_tmp/errors" 2>/dev/null || printf '%s' 'unavailable:null:null:null')
+cs=${ctx_stats%%:*}; series=${ctx_stats#*:}
+es=${err_stats%%:*}; err_values=${err_stats#*:}; logs=${err_values%%:*}; err_values=${err_values#*:}; traces=${err_values%%:*}; spans=${err_values#*:}
+[ -z "$cs" ] && { cs=unavailable; series=null; }
+[ -z "$es" ] && { es=unavailable; logs=null; traces=null; spans=null; }
 [ "$cs" = ok ] && [ "$series" = 0 ] && cs=no_data
 [ "$es" = ok ] && [ "$logs" = 0 ] && [ "$traces" = 0 ] && es=no_data
 if [ "$json" = 1 ]; then

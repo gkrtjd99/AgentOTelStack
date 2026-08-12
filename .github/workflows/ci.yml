@@ -45,6 +45,8 @@ jobs:
           docker run --rm -v "$PWD/gateway:/src" -w /src golang:1.26.5-bookworm@sha256:53eeac89074db483fdf0ab3be1df32bf6e47562263d2d0d6baa7f26acb4957dd go build ./...
       - name: runtime authoritative checks
         run: tests/runtime/authoritative.sh
+      - name: Gateway-only documentation contract
+        run: scripts/test-doc-contract.sh
       - name: installed MCP lifecycle
         run: tests/runtime/install_lifecycle.sh
       - name: identity and concurrency checks

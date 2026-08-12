@@ -17,68 +17,20 @@ processors:
     limit_mib: 256
     spike_limit_mib: 64
 
-  # Resource shaping is intentionally fail-closed for stream identity.  Only
-  # the low-cardinality project/service/environment dimensions are retained;
-  # run/checkout/machine/branch/commit/instance IDs must never become labels.
+  # Resource shaping is intentionally fail-closed for stream identity.  Remove
+  # any caller-supplied project first, then derive the canonical project only
+  # from the UUID resource attribute.  The downstream allowlist retains only
+  # the low-cardinality project/service/environment dimensions.
   resource/sanitize:
     attributes:
+      - key: project
+        action: delete
       - key: project
         from_attribute: agentotel.project.id
         action: upsert
       - key: agentotel.project.id
         action: delete
-      - key: project
-        from_attribute: project.name
-        action: upsert
       - key: project.name
-        action: delete
-      - key: service.namespace
-        action: delete
-      - key: service.version
-        action: delete
-      - key: deployment.environment.name
-        action: delete
-      - key: service.instance.id
-        action: delete
-      - key: host.id
-        action: delete
-      - key: host.name
-        action: delete
-      - key: host.arch
-        action: delete
-      - key: os.type
-        action: delete
-      - key: os.version
-        action: delete
-      - key: process.pid
-        action: delete
-      - key: process.parent_pid
-        action: delete
-      - key: process.executable.path
-        action: delete
-      - key: process.command_line
-        action: delete
-      - key: run_id
-        action: delete
-      - key: run.id
-        action: delete
-      - key: smoke.run_id
-        action: delete
-      - key: checkout_id
-        action: delete
-      - key: checkout.id
-        action: delete
-      - key: machine_id
-        action: delete
-      - key: machine.id
-        action: delete
-      - key: branch
-        action: delete
-      - key: commit
-        action: delete
-      - key: vcs.ref.head.revision
-        action: delete
-      - key: vcs.repository.ref.revision
         action: delete
 
   # Common attribute/body shaping after redaction. Keep resource attributes
@@ -133,23 +85,6 @@ processors:
           # by the orders_processed_total queries; future labels are dropped
           # by default rather than merely being added to a denylist.
           - keep_keys(attributes, ["outcome"])
-          - delete_key(attributes, "run_id")
-          - delete_key(attributes, "run.id")
-          - delete_key(attributes, "checkout_id")
-          - delete_key(attributes, "checkout.id")
-          - delete_key(attributes, "machine_id")
-          - delete_key(attributes, "machine.id")
-          - delete_key(attributes, "branch")
-          - delete_key(attributes, "commit")
-          - delete_key(attributes, "instance")
-          - delete_key(attributes, "instance_id")
-          - delete_key(attributes, "http.url")
-          - delete_key(attributes, "url.full")
-          - delete_key(attributes, "db.statement")
-          - delete_key(attributes, "gen_ai.prompt")
-          - delete_key(attributes, "gen_ai.completion")
-          - delete_key(attributes, "gen_ai.input.messages")
-          - delete_key(attributes, "gen_ai.output.messages")
 
   transform/trace-sanitize:
     error_mode: propagate
@@ -200,8 +135,9 @@ processors:
           - replace_pattern(attributes["url.full"], "[?#].*$", "") where attributes["url.full"] != nil
 
   batch:
-    timeout: 5s
+    timeout: 1s
     send_batch_size: 1024
+    send_batch_max_size: 1024
 
   resource_detection:
     detectors: [env]

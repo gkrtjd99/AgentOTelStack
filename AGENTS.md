@@ -16,7 +16,7 @@ You do **not** need any SDK or client library — just `curl` via these wrappers
    `./obs/correlate.sh <trace_id>` to see its spans, every related log line,
    and a same-service metrics snapshot.
 4. **Reason & change** — edit code under `./app` (or your own service).
-5. **Re-run** — `make demo` (or `./bin/obs compose --profile demo up -d --build app)` to restart with your change,
+5. **Re-run** — `AGENTOTEL_DEV_MODE=1 ./bin/obs compose --profile demo up -d --build app` to restart with your change,
    then re-run the workload and compare the metrics. Repeat.
 
 ## Architecture (what's running)
@@ -34,7 +34,7 @@ app (OTLP) ──> Gateway :4318 ──> otel-collector ──fanout──> Vict
 ## Query tools (your interface)
 
 The query helpers use `GATEWAY_URL` (default `http://127.0.0.1:17777`) and
-`GATEWAY_QUERY_TOKEN`. After `make setup`, run a helper through the credential
+`GATEWAY_QUERY_TOKEN`. After `obs setup`, run a helper through the credential
 loader so the token is read from the 0600 XDG store without printing it:
 `./bin/obs credentials run -- ./obs/services.sh`. An explicitly supplied
 `GATEWAY_QUERY_TOKEN` remains supported for controlled operator/test overrides.
@@ -47,7 +47,7 @@ loader so the token is read from the 0600 XDG store without printing it:
 | `./obs/correlate.sh <32-hex-trace-id>` | bounded correlation | `./bin/obs credentials run -- ./obs/correlate.sh 7f3a2b...` |
 | `./obs/app.sh <subcmd> ...` | multi-app helper | `./bin/obs credentials run -- ./obs/app.sh summary sample-app` |
 | `./obs/overview.sh [--compact\|--json] [--lookback 15m] [service]` | terminal dashboard | `./bin/obs credentials run -- ./obs/overview.sh --compact sample-app` |
-| `make grafana` | browser dashboard | `http://localhost:3001` |
+| `AGENTOTEL_DEV_MODE=1 ./bin/obs compose --profile dashboard up -d grafana` | browser dashboard | `http://localhost:3001` |
 
 Common starting queries:
 
@@ -88,7 +88,7 @@ Common starting queries:
 ./bin/obs credentials run -- ./obs/metrics.sh sample-app 15m
 
 # Optional: run the full write/read path smoke test
-make smoke
+./bin/obs credentials run -- ./scripts/smoke.sh
 ```
 
 ## Conventions for agents
@@ -101,7 +101,7 @@ make smoke
 - **Don't guess time ranges** — Gateway helpers accept bounded lookbacks such as
   `5m`, `15m`, `1h`, `6h`, and `24h`; they do not accept backend query syntax.
 - **The app is swappable.** To observe a different service, replace `./app` (keep
-  it emitting OTLP to the collector) — everything else is unchanged.
+  it emitting authenticated OTLP to the Gateway) — everything else is unchanged.
 - After a fix, **leave the workload re-run output** so the next agent sees the
   before/after.
 
@@ -113,4 +113,4 @@ make smoke
 | Gateway | 4318 / 17777 | host-facing authenticated OTLP ingest / query |
 | otel-collector | 4317/4318 | internal OTLP gRPC/HTTP fan-out only |
 | VictoriaLogs / Metrics / Traces | 9428 / 8428 / 10428 | backend-only, internal network |
-| Grafana | 3001 | Optional dashboard profile (`make grafana`) |
+| Grafana | 3001 | Optional dashboard profile |

@@ -9,24 +9,24 @@ source repository to remain checked out.
 From a clone, run:
 
 ```bash
-make install VERSION=2.0.0
-make setup
-make up
-make doctor
+make install VERSION=2.0.1
+obs setup
+obs up
+obs doctor
 ```
 
 `make install` creates a 0600 credential store containing distinct Gateway
 ingest/query tokens and the Grafana admin password. A source checkout that has
 not been installed can initialize the same store with
-`./bin/obs credentials ensure` (or `make setup` does this automatically).
+`./bin/obs credentials ensure` (or `obs setup` does this automatically).
 Compose targets load those values in-process; secrets are not printed or
 written to a repository `.env` file. Existing `GATEWAY_*`/`GF_*` environment
 values remain supported as explicit operator overrides.
 
-`make setup` creates and labels the exact persistent volumes. `make up` starts
+`obs setup` creates and labels the exact persistent volumes. `obs up` starts
 the shared six-service runtime: Gateway, collector, queue initializer, and
-the three Victoria backends (the sample app is off). Use `make demo` when the
-bundled sample app is wanted.
+the three Victoria backends (the sample app is off). For a checkout demo, run
+`AGENTOTEL_DEV_MODE=1 ./bin/obs compose --profile demo up -d --build`.
 
 The launcher and runtime are installed under the XDG agentotel directories and
 can be invoked from another directory. Query credentials are read from the
@@ -40,17 +40,17 @@ It is built for the host OS and architecture and remains usable if this clone is
 moved or deleted. Docker is required during installation to build it; use
 `make install WITHOUT_MCP=1` only when the MCP capability is intentionally not
 wanted.
+Launch MCP with the workspace project as its current directory (or provide a
+validated `AGENTOTEL_PROJECT_ID` from the workspace launcher). Its three tools
+always query that project and do not accept an arbitrary project argument.
 
 ## Maintenance and safety
 
 ```bash
-make doctor
-make smoke
-make down       # stop, preserve telemetry
-make clean      # cleanup, preserve telemetry
-make migrate    # legacy volume: prints manual backup/copy/verify flow
-make reset      # destructive, interactive UUID/project/volume guard
-make uninstall  # removes launcher only; runtimes and telemetry remain
+obs doctor
+obs down        # stop, preserve telemetry
+obs migrate volumes --confirm # legacy volume: prints manual backup/copy/verify flow
+obs reset --all --confirm     # destructive, interactive UUID/project/volume guard
 ```
 
 `obs storage --json` is a read-only storage and cardinality check. It reports
@@ -66,4 +66,4 @@ The read-only MCP adapter exposes exactly three tools:
 
 If `doctor` reports `migration_required`, do not delete or auto-convert the
 legacy volume. Back it up and follow the manual migration instructions printed
-by `make migrate`, then verify before switching the runtime.
+by `obs migrate volumes --confirm`, then verify before switching the runtime.

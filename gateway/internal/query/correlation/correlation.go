@@ -115,15 +115,15 @@ func Decode(traceID string, raw any) Result {
 		if r.RootSpanID == "" {
 			r.Indicators = append(r.Indicators, "missing_root")
 		}
+		spanIDs := make(map[string]struct{}, len(r.Spans))
+		for _, s := range r.Spans {
+			if s.SpanID != "" {
+				spanIDs[s.SpanID] = struct{}{}
+			}
+		}
 		for _, s := range r.Spans {
 			if s.ParentSpanID != "" {
-				found := false
-				for _, x := range r.Spans {
-					if x.SpanID == s.ParentSpanID {
-						found = true
-					}
-				}
-				if !found {
+				if _, found := spanIDs[s.ParentSpanID]; !found {
 					r.Indicators = append(r.Indicators, "broken_parent_ref")
 				}
 			}
@@ -202,7 +202,7 @@ func processProject(m map[string]any) string {
 			}
 		}
 	}
-	return "unknown"
+	return ""
 }
 func str(v any) string {
 	s, _ := v.(string)

@@ -1,5 +1,16 @@
 # Changelog
 
+## 2.0.1 — 2026-08-13
+
+- Corrected Compose project identity resolution so demo workloads use the
+  current workspace UUIDv4 and cannot silently reuse a stale or shared scope.
+- Improved query/runtime correctness with authenticated Gateway-only access,
+  bounded parallel backend queries, safer response projection, and runtime-
+  specific image/version selection across rollback.
+- Hardened credentials, volume identity checks, storage diagnostics, and MCP
+  build/version plumbing; added targeted release, documentation, and runtime
+  contract coverage.
+
 ## 2.0.0 — 2026-08-12
 
 ### Highlights

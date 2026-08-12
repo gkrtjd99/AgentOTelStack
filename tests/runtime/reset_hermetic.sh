@@ -38,7 +38,7 @@ run_case() {
   find "$t/state" -type f -delete; mkdir -p "$t/state/agentotel"; uuid=11111111-1111-1111-1111-111111111111; printf '%s\n' "$uuid" >"$t/state/agentotel/stack.uuid"
   for v in $vols; do printf '%s|dev-observability\n' "$label" >"$t/state/dev-observability_$v"; done
   printf 'unrelated|other\n' >"$t/state/unrelated_volume"
-  set +e; RESET_ANSWER=$answer FAKE_DOCKER_MODE=$mode FAKE_DOCKER_STATE=$t/state PATH=$t/bin:$PATH HOME=$t/home XDG_STATE_HOME=$t/state XDG_CONFIG_HOME=$t/config XDG_RUNTIME_DIR=$t/run COMPOSE_PROJECT_NAME=dev-observability python3 "$t/driver.py" "$root/bin/obs" reset --all --confirm >"$t/out" 2>&1; rc=$?; set -e
+  set +e; AGENTOTEL_DEV_MODE=1 RESET_ANSWER=$answer FAKE_DOCKER_MODE=$mode FAKE_DOCKER_STATE=$t/state PATH=$t/bin:$PATH HOME=$t/home XDG_STATE_HOME=$t/state XDG_CONFIG_HOME=$t/config XDG_RUNTIME_DIR=$t/run COMPOSE_PROJECT_NAME=dev-observability python3 "$t/driver.py" "$root/bin/obs" reset --all --confirm >"$t/out" 2>&1; rc=$?; set -e
   [ "$rc" -eq "$expect" ] || { echo "FAIL $mode rc=$rc"; cat "$t/out"; exit 1; }
   if [ "$expect" -eq 0 ]; then [ -s "$t/state/removed" ] || { echo "FAIL $mode no removals"; exit 1; }; [ -f "$t/state/unrelated_volume" ] || { echo "FAIL $mode unrelated removed"; exit 1; }; else [ ! -e "$t/state/removed" ] || { echo "FAIL $mode deleted volumes"; exit 1; }; fi
 }
@@ -47,6 +47,6 @@ run_case ok wrong 2 11111111-1111-1111-1111-111111111111
 run_case ok 11111111-1111-1111-1111-111111111111 2 wrong-label
 run_case in-use 11111111-1111-1111-1111-111111111111 2 11111111-1111-1111-1111-111111111111
 run_case stop-failure 11111111-1111-1111-1111-111111111111 2 11111111-1111-1111-1111-111111111111
-set +e; FAKE_DOCKER_MODE=ok FAKE_DOCKER_STATE=$t/state PATH=$t/bin:$PATH HOME=$t/home XDG_STATE_HOME=$t/state XDG_CONFIG_HOME=$t/config XDG_RUNTIME_DIR=$t/run "$root/bin/obs" reset --all --confirm </dev/null >/dev/null 2>&1; rc=$?; set -e
+set +e; AGENTOTEL_DEV_MODE=1 FAKE_DOCKER_MODE=ok FAKE_DOCKER_STATE=$t/state PATH=$t/bin:$PATH HOME=$t/home XDG_STATE_HOME=$t/state XDG_CONFIG_HOME=$t/config XDG_RUNTIME_DIR=$t/run "$root/bin/obs" reset --all --confirm </dev/null >/dev/null 2>&1; rc=$?; set -e
 [ "$rc" -ne 0 ] || { echo 'FAIL nonTTY'; exit 1; }
 echo 'reset hermetic checks passed (positive + 5 refusal cases)'

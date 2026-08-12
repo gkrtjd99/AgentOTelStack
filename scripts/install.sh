@@ -65,7 +65,7 @@ trap cleanup EXIT HUP INT TERM
 mkdir -p "$stage" "$stage/libexec/agentotel" "$stage/assets"
 if [ "$without_mcp" = false ]; then
   mkdir -p "$stage/bin"
-  if ! "$ROOT/scripts/build-mcp.sh" "$stage/bin/agentotel-mcp"; then
+  if ! VERSION="$ver" "$ROOT/scripts/build-mcp.sh" "$stage/bin/agentotel-mcp"; then
     rm -rf "$stage"; echo 'install failed: MCP is enabled by default; install Docker or pass --without-mcp' >&2; exit 1
   fi
 fi
@@ -75,7 +75,7 @@ cp "$ROOT"/libexec/agentotel/*.sh "$stage/libexec/agentotel/"
 for d in app backend-health gateway grafana mcp otel-collector workload obs dashboards; do
   if [ -d "$ROOT/$d" ]; then
     mkdir -p "$stage/assets/$d"
-    (cd "$ROOT/$d" && find . -type f -not -path './node_modules/*' -not -path './.git/*' -not -name '*.log' -exec sh -c 'mkdir -p "$1/$(dirname "$2")"; cp "$2" "$1/$2"' sh "$stage/assets/$d" {} \;)
+    (cd "$ROOT/$d" && find . -type f -not -path './node_modules/*' -not -path './.git/*' -not -name '*.log' -exec sh -c 'dest=$1; shift; for src do mkdir -p "$dest/$(dirname "$src")"; cp "$src" "$dest/$src"; done' sh "$stage/assets/$d" {} +)
   fi
 done
 cp "$ROOT/docker-compose.yml" "$stage/assets/"; [ -f "$ROOT/.env.example" ] && cp "$ROOT/.env.example" "$stage/assets/"
@@ -90,7 +90,7 @@ for required in \
   [ -f "$required" ] || { echo "install asset missing: $required" >&2; exit 1; }
 done
 # shellcheck disable=SC2094
-(cd "$stage" && find . -type f ! -name manifest.sha256 -exec shasum -a 256 {} \; | sort > manifest.sha256); chmod 600 "$stage/manifest.sha256"
+(cd "$stage" && find . -type f ! -name manifest.sha256 -exec shasum -a 256 {} + | sort > manifest.sha256); chmod 600 "$stage/manifest.sha256"
 # Validate/create credentials while the new runtime is still staging. No
 # version pointer or launcher is changed until this succeeds.
 "$stage/libexec/agentotel/credentials.sh" ensure >/dev/null

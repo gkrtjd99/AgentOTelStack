@@ -2,7 +2,7 @@
 . "$(dirname "$0")/common.sh"; mkdirs
 FILE="$CFG/credentials"
 read_key(){ key=$1; sed -n "s/.*\"$key\":\"\([0-9a-f][0-9a-f]*\)\".*/\1/p" "$FILE"; }
-status(){ [ -e "$FILE" ] || { echo '{"status":"missing"}'; return; }; [ ! -L "$FILE" ] || die 'credential symlink rejected'; [ -f "$FILE" ] || die 'credential store is not a regular file'; chmod 600 "$FILE"; for key in ingest_token query_token grafana_admin_password; do value=$(read_key "$key"); [ -n "$value" ] || { echo '{"status":"incomplete"}'; return 1; }; done; load_credentials; echo '{"status":"configured"}'; }
+status(){ [ -e "$FILE" ] || { echo '{"status":"missing"}'; return; }; [ ! -L "$FILE" ] || die 'credential symlink rejected'; [ -f "$FILE" ] || die 'credential store is not a regular file'; chmod 600 "$FILE"; for key in ingest_token query_token grafana_admin_password; do value=$(read_key "$key"); [ -n "$value" ] || { echo '{"status":"incomplete"}'; return 1; }; done; echo '{"status":"configured"}'; }
 cleanup_tmp(){
   if [ -n "${tmp:-}" ]; then
     rm -f "$tmp"
@@ -32,6 +32,12 @@ run(){
   shift; [ "$#" -gt 0 ] || die 'credentials run requires a command'
   ensure >/dev/null
   . "$(dirname "$0")/common.sh"
+  load_query_credential
+  # Query helpers only need the read token. Do not leak the ingest token or
+  # Grafana password inherited from the caller (or their file indirections)
+  # into an arbitrary child process.
+  unset GATEWAY_INGEST_TOKEN GATEWAY_INGEST_TOKEN_FILE
+  unset GF_SECURITY_ADMIN_PASSWORD GF_SECURITY_ADMIN_PASSWORD_FILE
   exec "$@"
 }
 case "${1:-}" in rotate) rotate;; ensure) ensure;; status) status;; run) shift; run "$@";; *) die 'invalid credentials command';; esac
