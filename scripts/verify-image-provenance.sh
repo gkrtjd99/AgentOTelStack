@@ -19,7 +19,7 @@ python3 - "$tmp" "$compose_dir" <<'PY'
 import json, pathlib, re, sys
 model=json.load(open(sys.argv[1])); root=pathlib.Path(sys.argv[2]); errors=[]
 digest=re.compile(r'@sha256:[0-9a-f]{64}$', re.I)
-from_re=re.compile(r'^\s*FROM\s+(\S+)(?:\s+AS\s+(\S+))?\s*$', re.I)
+from_re=re.compile(r'^\s*FROM(?:\s+--platform=(\S+))?\s+(\S+)(?:\s+AS\s+(\S+))?\s*$', re.I)
 for name, svc in model.get('services', {}).items():
     image=svc.get('image'); build=svc.get('build')
     if not build and (not image or not digest.search(image)):
@@ -34,7 +34,7 @@ for name, svc in model.get('services', {}).items():
     for n,line in enumerate(df.read_text().splitlines(),1):
         m=from_re.match(line)
         if not m: continue
-        base, stage=m.group(1), m.group(2)
+        platform, base, stage=m.group(1), m.group(2), m.group(3)
         if base.lower() in stages: pass
         elif not digest.search(base): errors.append(f'{name}: {df}:{n}: FROM must use full @sha256 digest ({base})')
         if stage: stages.add(stage.lower())
@@ -51,6 +51,8 @@ for df in sorted(health_dir.glob('Dockerfile.*')):
     text = df.read_text()
     if not re.search(r'^ARG\s+TARGETOS\s*$', text, re.M) or not re.search(r'^ARG\s+TARGETARCH\s*$', text, re.M):
         errors.append(f'{df}: health build must declare BuildKit TARGETOS and TARGETARCH')
+    if not re.search(r'^FROM\s+--platform=\$BUILDPLATFORM\s+\S+\s+AS\s+build\s*$', text, re.M):
+        errors.append(f'{df}: health builder must use native BuildKit $BUILDPLATFORM')
     if re.search(r'GOARCH\s*=\s*amd64\b', text):
         errors.append(f'{df}: health build must not hard-code GOARCH=amd64')
     if not re.search(r'GOOS="\$\{TARGETOS:-\$\(go env GOOS\)\}"', text) or not re.search(r'GOARCH="\$\{TARGETARCH:-\$\(go env GOARCH\)\}"', text):

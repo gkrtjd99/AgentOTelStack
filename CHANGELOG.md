@@ -52,9 +52,10 @@ stored error-trace discovery, complete three-backend correlation with
 `error=true`, schema/API version `1.0`, and a controlled VictoriaLogs outage
 with partial response followed by restart recovery.
 
-The previous hosted push failed; these corrections address that failure. The
-new GitHub-hosted CI and supply-chain result is pending the next push and is
-not claimed as passed here.
+The previous hosted push failed; these corrections address that failure.
+GitHub-hosted CI and supply-chain checks for PR #1 are the publication gate;
+their final status is recorded in the PR checks, and this changelog does not
+pre-assert that outcome.
 
 ### Known limitations
 
@@ -77,6 +78,7 @@ checksum으로 고정되며 Grafana CVE waiver는 2026-09-11에 만료됩니다.
 project/credential 및 atomic install/symlink 검증, 전체 이력·소스 Gitleaks,
 app/Gateway Trivy HIGH/CRITICAL 0건, Grafana waiver, amd64/arm64 backend health,
 인증과 `error=true`를 포함한 3-backend correlation 및 VictoriaLogs 장애·복구를
-확인했습니다. 이전 hosted push는 실패했으며 수정 후 새 GitHub-hosted 결과는
-다음 push 뒤 pending 상태입니다. `project.id`는 인증 경계가 아니며 README의
-기존 수치는 현재 v2.0.0 실행 증거가 아닙니다.
+확인했습니다. 이전 hosted push는 실패했으며 이 수정이 이를 보완합니다. PR #1의
+GitHub-hosted CI/supply-chain checks가 publication gate이고 최종 상태는 PR checks에
+기록되며, 이 changelog는 그 결과를 선행 주장하지 않습니다. `project.id`는 인증
+경계가 아니며 README의 기존 수치는 현재 v2.0.0 실행 증거가 아닙니다.
