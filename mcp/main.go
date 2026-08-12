@@ -285,10 +285,20 @@ func cred() (string, error) {
 	}
 	if strings.HasSuffix(p, "credentials") {
 		var j map[string]string
-		if json.Unmarshal(b, &j) != nil || len(j) != 1 || strings.TrimSpace(j["query_token"]) == "" {
+		if json.Unmarshal(b, &j) != nil || len(j) != 3 {
 			return "", errors.New("invalid credentials")
 		}
-		return strings.TrimSpace(j["query_token"]), nil
+		if _, ok := j["ingest_token"]; !ok {
+			return "", errors.New("invalid credentials")
+		}
+		if _, ok := j["grafana_admin_password"]; !ok {
+			return "", errors.New("invalid credentials")
+		}
+		t := strings.TrimSpace(j["query_token"])
+		if t == "" || strings.ContainsAny(t, "\r\n") {
+			return "", errors.New("invalid credentials")
+		}
+		return t, nil
 	}
 	t := strings.TrimSpace(string(b))
 	if t == "" || strings.ContainsAny(t, "\r\n") {

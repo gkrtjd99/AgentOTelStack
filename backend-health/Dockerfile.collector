@@ -1,7 +1,9 @@
 FROM golang:1.26.0-alpine@sha256:d4c4845f5d60c6a974c6000ce58ae079328d03ab7f721a0734277e69905473e5 AS build
+ARG TARGETOS
+ARG TARGETARCH
 WORKDIR /src
 COPY health.go .
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags='-s -w' -o /health-probe health.go
+RUN set -eu; GOOS="${TARGETOS:-$(go env GOOS)}" GOARCH="${TARGETARCH:-$(go env GOARCH)}" CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o /health-probe health.go
 FROM otel/opentelemetry-collector-contrib:0.158.0@sha256:c5918f78992ee73b0d6f0e599423ac5ec52dd5d9726733114d6eca53d5a32ed5
 COPY --from=build /health-probe /health-probe
 HEALTHCHECK --interval=5s --timeout=3s --retries=20 CMD ["/health-probe","-url","http://127.0.0.1:13133/"]

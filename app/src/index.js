@@ -9,10 +9,10 @@
 const express = require("express");
 const pinoHttp = require("pino-http");
 const { metrics, trace } = require("@opentelemetry/api");
+const { safeReq } = require("./safe-request");
 
 const path = require("path");
 
-const safeReq = (req) => ({ method: req.method, url: req.url });
 const safeRes = (res) => ({ statusCode: res.statusCode });
 
 const app = express();

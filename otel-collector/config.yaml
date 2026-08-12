@@ -128,6 +128,11 @@ processors:
     metric_statements:
       - context: datapoint
         statements:
+          # Metric labels are an explicit bounded contract. `outcome` is the
+          # only datapoint attribute emitted by the sample app and is required
+          # by the orders_processed_total queries; future labels are dropped
+          # by default rather than merely being added to a denylist.
+          - keep_keys(attributes, ["outcome"])
           - delete_key(attributes, "run_id")
           - delete_key(attributes, "run.id")
           - delete_key(attributes, "checkout_id")

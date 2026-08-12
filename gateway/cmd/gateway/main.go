@@ -23,19 +23,23 @@ import (
 )
 
 const (
-	maxBody       = 8 << 20
-	maxHeaderSize = 16 << 10
-	requestLimit  = 10 * time.Second
+	maxBody                 = 8 << 20
+	maxHeaderSize           = 16 << 10
+	requestLimit            = 10 * time.Second
+	defaultQueryConcurrency = 16
+	maxQueryConcurrency     = 128
 )
 
 var ingestPaths = []string{"/v1/traces", "/v1/metrics", "/v1/logs"}
 
 type config struct {
-	token         string
-	upstream      string
-	maxConcurrent int
-	queryToken    string
-	query         query.Client
+	token              string
+	upstream           string
+	maxConcurrent      int
+	queryMaxConcurrent int
+	queryToken         string
+	query              query.Client
+	querySem           chan struct{}
 }
 
 type configError struct{ s string }
@@ -79,7 +83,22 @@ func load() (config, error) {
 	if err != nil || u.Scheme != "http" || u.Host == "" || u.Path != "" || u.RawQuery != "" || u.Fragment != "" {
 		return config{}, &configError{"invalid collector upstream"}
 	}
-	return config{token: token, queryToken: queryToken, upstream: strings.TrimRight(upstream, "/"), maxConcurrent: 32}, nil
+	queryMax, err := boundedConcurrency(os.Getenv("GATEWAY_QUERY_MAX_CONCURRENT"), defaultQueryConcurrency, maxQueryConcurrency)
+	if err != nil {
+		return config{}, err
+	}
+	return config{token: token, queryToken: queryToken, upstream: strings.TrimRight(upstream, "/"), maxConcurrent: 32, queryMaxConcurrent: queryMax}, nil
+}
+
+func boundedConcurrency(raw string, defaultValue, maximum int) (int, error) {
+	if raw == "" {
+		return defaultValue, nil
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n < 1 || n > maximum {
+		return 0, &configError{"invalid query concurrency"}
+	}
+	return n, nil
 }
 
 // tokenFile accepts either a single raw token or the XDG credentials JSON
@@ -118,6 +137,7 @@ func main() {
 	}
 	qcfg := c
 	qcfg.query = qc
+	qcfg.querySem = make(chan struct{}, c.queryMaxConcurrent)
 	server := &http.Server{
 		Addr:              "0.0.0.0:4318",
 		Handler:           limitHeaders(mux),
@@ -186,6 +206,14 @@ func envOr(k, d string) string {
 	return d
 }
 func queryHandler(c config, path string) http.HandlerFunc {
+	sem := c.querySem
+	if sem == nil {
+		n := c.queryMaxConcurrent
+		if n < 1 || n > maxQueryConcurrency {
+			n = defaultQueryConcurrency
+		}
+		sem = make(chan struct{}, n)
+	}
 	return func(w http.ResponseWriter, r *http.Request) {
 		if c.queryToken == "" || !auth(r, c.queryToken) {
 			writeErr(w, http.StatusUnauthorized)
@@ -262,6 +290,13 @@ func queryHandler(c config, path string) http.HandlerFunc {
 			writeErr(w, 400)
 			return
 		}
+		select {
+		case sem <- struct{}{}:
+			defer func() { <-sem }()
+		default:
+			writeQueryOverloaded(w)
+			return
+		}
 		ctx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
 		defer cancel()
 		data := map[string]any{"items": []any{}}
@@ -282,23 +317,25 @@ func queryHandler(c config, path string) http.HandlerFunc {
 			v, e := retry(ctx, func() (any, error) { return c.query.Services(ctx) })
 			add("traces", v, e)
 		case "/v1/errors":
-			v, e := retry(ctx, func() (any, error) { return c.query.LogsQueryScoped(ctx, in.Service, in.Project, start, end, in.Limit) })
+			v, e := retry(ctx, func() (any, error) {
+				return c.query.LogsErrorsScoped(ctx, in.Service, in.Project, start, end, in.Limit)
+			})
 			add("logs", v, e)
-			if in.Service != "" {
-				v, e = retry(ctx, func() (any, error) { return c.query.TracesQueryScoped(ctx, in.Service, in.Project, in.Limit) })
-				add("traces", v, e)
-			}
+			v, e = retry(ctx, func() (any, error) { return c.query.TracesQueryScoped(ctx, in.Service, in.Project, in.Limit) })
+			add("traces", v, e)
 		case "/v1/context":
 			v, e := retry(ctx, func() (any, error) { return c.query.LogsQueryScoped(ctx, in.Service, in.Project, start, end, in.Limit) })
 			add("logs", v, e)
-			v, e = retry(ctx, func() (any, error) { return c.query.MetricsQuery(ctx, in.Service, start, end, 15*time.Second) })
+			v, e = retry(ctx, func() (any, error) {
+				return c.query.MetricsQueryScoped(ctx, in.Service, in.Project, start, end, 15*time.Second)
+			})
 			add("metrics", v, e)
 		case "/v1/correlate":
-			v, e := retry(ctx, func() (any, error) { return c.query.TraceQuery(ctx, in.TraceID) })
+			v, e := retry(ctx, func() (any, error) { return c.query.TraceQueryScoped(ctx, in.TraceID, in.Project) })
 			if e == nil {
 				r := correlation.Decode(in.TraceID, v)
 				ls, le := traceWindow(v, start, end)
-				lv, le2 := retry(ctx, func() (any, error) { return c.query.LogsTrace(ctx, in.TraceID, ls, le, in.Limit) })
+				lv, le2 := retry(ctx, func() (any, error) { return c.query.LogsTraceScoped(ctx, in.TraceID, in.Project, ls, le, in.Limit) })
 				if le2 == nil {
 					r.Logs = project(lv)
 					backs = append(backs, status.Backend{Name: "logs", Status: "ok"})
@@ -306,7 +343,9 @@ func queryHandler(c config, path string) http.HandlerFunc {
 					backs = append(backs, status.Backend{Name: "logs", Status: backendStatus(le2), Error: safeError(le2)})
 					r.Indicators = append(r.Indicators, "signal_not_observed")
 				}
-				mv, me := retry(ctx, func() (any, error) { return c.query.MetricsTrace(ctx, r.Services, ls, le, 15*time.Second) })
+				mv, me := retry(ctx, func() (any, error) {
+					return c.query.MetricsTraceScoped(ctx, r.Services, in.Project, ls, le, 15*time.Second)
+				})
 				if me == nil {
 					r.Metrics = project(mv)
 					backs = append(backs, status.Backend{Name: "metrics", Status: "ok"})
@@ -552,7 +591,14 @@ func handleIngest(c config, sem chan struct{}, path string, w http.ResponseWrite
 	forward.Header.Set("Content-Type", "application/x-protobuf")
 	// Deliberately forward only the required content type. This excludes all
 	// credentials, cookies, proxy and hop-by-hop headers.
-	resp, err := http.DefaultClient.Do(forward)
+	// OTLP forwarding is a write operation and must never follow a redirect to
+	// an untrusted host. In particular, following a 307 could disclose the
+	// complete telemetry body to the redirect target.
+	forwardClient := *http.DefaultClient
+	forwardClient.CheckRedirect = func(*http.Request, []*http.Request) error {
+		return http.ErrUseLastResponse
+	}
+	resp, err := forwardClient.Do(forward)
 	if err != nil {
 		if ctx.Err() != nil {
 			writeErr(w, http.StatusGatewayTimeout)
@@ -595,4 +641,9 @@ func health(w http.ResponseWriter, r *http.Request) {
 
 func writeErr(w http.ResponseWriter, status int) {
 	http.Error(w, http.StatusText(status), status)
+}
+
+func writeQueryOverloaded(w http.ResponseWriter) {
+	w.Header().Set("Retry-After", "1")
+	http.Error(w, "query overloaded", http.StatusTooManyRequests)
 }

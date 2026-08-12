@@ -1,7 +1,32 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const pino = require('pino');
 const { BatchLogRecordProcessor } = require('@opentelemetry/sdk-logs');
 const { SeverityNumber } = require('@opentelemetry/api-logs');
+const { pathnameOnly, safeReq } = require('../src/safe-request');
+
+test('request logging keeps pathname and redacts query parameters', () => {
+  const request = safeReq({ method: 'GET', url: '/api/checkout?fail=1&token=secret' });
+  assert.deepEqual(request, { method: 'GET', url: '/api/checkout' });
+  assert.equal(pathnameOnly('https://example.test/a/b?password=secret#fragment'), '/a/b');
+  assert.doesNotMatch(JSON.stringify(request), /fail|token|secret/);
+});
+
+test('stdout request record never contains query parameters', () => {
+  let output = '';
+  const logger = pino({ serializers: { req: safeReq } }, { write: (chunk) => { output += chunk; } });
+  logger.info({ req: { method: 'GET', url: '/api/checkout?token=secret' } }, 'request');
+  assert.match(output, /"url":"\/api\/checkout"/);
+  assert.doesNotMatch(output, /token|secret/);
+});
+
+test('collector telemetry contract strips URL queries and bounds metric labels', () => {
+  const config = fs.readFileSync(path.join(__dirname, '../../otel-collector/config.yaml'), 'utf8');
+  assert.ok(config.includes('replace_pattern(attributes["http.url"], "[?#].*$"'));
+  assert.match(config, /keep_keys\(attributes, \["outcome"\]\)/);
+});
 
 test('BatchLogRecordProcessor accepts an exporter option and flushes records', async () => {
   const exported = [];

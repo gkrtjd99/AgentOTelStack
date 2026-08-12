@@ -3,6 +3,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 stream_fields="$(awk '/VL-Stream-Fields:/{print $2}' otel-collector/config.yaml | tr -d '"')"
 [[ "$stream_fields" == 'project,service.name,deployment.environment' ]] || { echo "unexpected stream fields: $stream_fields" >&2; exit 1; }
+grep -A12 'transform/metric-sanitize:' otel-collector/config.yaml | grep -Fq 'keep_keys(attributes, ["outcome"])' || { echo 'cardinality-test: metric sanitizer must allowlist outcome' >&2; exit 1; }
 for forbidden in run_id run.id checkout_id checkout.id machine_id machine.id branch commit instance instance_id; do
   grep -A80 'transform/metric-sanitize:' otel-collector/config.yaml | grep -q "delete_key(attributes, \"$forbidden\")" || { echo "cardinality-test: metric sanitizer missing $forbidden" >&2; exit 1; }
 done

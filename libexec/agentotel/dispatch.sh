@@ -6,6 +6,7 @@ case "$cmd" in
  version) printf '{"version":"%s","schema":1}\n' "$VERSION";;
  stack-id) mkdirs; f="$STATE/stack.uuid"; if [ -f "$f" ]; then uuid=$(cat "$f"); else uuid=$(rand_uuid | tr A-F a-f); valid_uuid "$uuid" || die 'generated invalid stack UUID'; printf '%s\n' "$uuid" >"$f"; chmod 600 "$f"; fi; valid_uuid "$uuid" || die 'invalid stack UUID'; printf '%s\n' "$uuid";;
  credentials) exec "$(dirname "$0")/credentials.sh" "$@";;
+ compose) exec "$(dirname "$0")/compose.sh" "$@";;
  init) exec "$(dirname "$0")/project.sh" init "$@";; project) exec "$(dirname "$0")/project.sh" "$@";;
  source-state) exec "$(dirname "$0")/project.sh" source-state;;
  run) exec "$(dirname "$0")/run.sh" "$@";;

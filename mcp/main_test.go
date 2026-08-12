@@ -101,7 +101,7 @@ func TestCredentialsPrecedenceAndSecurity(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	write(filepath.Join(dir, "credentials"), `{"query_token":" json-token "}`, 0600)
+	write(filepath.Join(dir, "credentials"), `{"ingest_token":"ingest-token","query_token":" json-token ","grafana_admin_password":"grafana-token"}`, 0600)
 	write(filepath.Join(dir, "query.token"), "raw-token", 0600)
 	if got, _ := cred(); got != "json-token" {
 		t.Fatal(got)
@@ -120,6 +120,94 @@ func TestCredentialsPrecedenceAndSecurity(t *testing.T) {
 	if _, err := cred(); err == nil {
 		t.Fatal("accepted mode")
 	}
+}
+
+func TestCredentialsStoreValidation(t *testing.T) {
+	tests := []struct {
+		name string
+		data string
+		want string
+	}{
+		{
+			name: "generated store",
+			data: `{"ingest_token":"ingest-token","query_token":"query-token","grafana_admin_password":"grafana-token"}`,
+			want: "query-token",
+		},
+		{
+			name: "missing query token",
+			data: `{"ingest_token":"ingest-token","grafana_admin_password":"grafana-token"}`,
+		},
+		{
+			name: "empty query token",
+			data: `{"ingest_token":"ingest-token","query_token":"  ","grafana_admin_password":"grafana-token"}`,
+		},
+		{
+			name: "unknown field",
+			data: `{"ingest_token":"ingest-token","query_token":"query-token","grafana_admin_password":"grafana-token","unexpected":"value"}`,
+		},
+		{
+			name: "malformed json",
+			data: `{"ingest_token":"ingest-token","query_token":`,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			d := t.TempDir()
+			t.Setenv("XDG_CONFIG_HOME", d)
+			dir := filepath.Join(d, "agentotel")
+			if err := os.Mkdir(dir, 0700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(dir, "credentials"), []byte(tc.data), 0600); err != nil {
+				t.Fatal(err)
+			}
+			got, err := cred()
+			if tc.want == "" {
+				if err == nil {
+					t.Fatalf("accepted invalid credentials and returned %q", got)
+				}
+				return
+			}
+			if err != nil || got != tc.want {
+				t.Fatalf("cred() = %q, %v; want %q", got, err, tc.want)
+			}
+		})
+	}
+}
+
+func TestCredentialsStoreSymlinkAndMode(t *testing.T) {
+	d := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", d)
+	dir := filepath.Join(d, "agentotel")
+	if err := os.Mkdir(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	valid := []byte(`{"ingest_token":"ingest-token","query_token":"query-token","grafana_admin_password":"grafana-token"}`)
+	t.Run("symlink", func(t *testing.T) {
+		target := filepath.Join(d, "target-credentials")
+		if err := os.WriteFile(target, valid, 0600); err != nil {
+			t.Fatal(err)
+		}
+		path := filepath.Join(dir, "credentials")
+		if err := os.Symlink(target, path); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := cred(); err == nil {
+			t.Fatal("accepted credential symlink")
+		}
+		if err := os.Remove(path); err != nil {
+			t.Fatal(err)
+		}
+	})
+	t.Run("mode", func(t *testing.T) {
+		path := filepath.Join(dir, "credentials")
+		if err := os.WriteFile(path, valid, 0644); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := cred(); err == nil {
+			t.Fatal("accepted credentials with permissive mode")
+		}
+	})
 }
 
 func TestGatewayRequestAndResponses(t *testing.T) {

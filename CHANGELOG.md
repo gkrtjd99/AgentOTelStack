@@ -40,16 +40,21 @@
 
 ### Validation
 
-Executed validation completed with `make ci-local`: 13 PASS, 0 FAIL, 0 SKIP.
-Gateway and MCP gofmt checks were clean, and Gateway/MCP `go test` plus
-`go test -race` passed. The isolated live integration also passed wrong-token
-`401` and valid-token `200` checks, stored error-trace discovery, complete
-three-backend correlation, schema/API version `1.0`, a controlled VictoriaLogs
-outage with a partial response, and restart recovery. The release-version
-check and `git diff --check` passed as well.
+The full local CI-equivalent gate set passed, including Gateway/MCP gofmt,
+`go test` and `go test -race`, project/credential tests, atomic install/symlink
+tests, release-version and `git diff --check` validation. Gitleaks passed for
+the full history and source snapshot; fresh app and Gateway Trivy scans found
+zero HIGH/CRITICAL findings; the exact Grafana waiver, pinned backend health
+images on amd64/arm64, and related supply-chain checks passed.
 
-The GitHub-hosted full CI and supply-chain jobs were still pending after push;
-they are not represented as passed here.
+Isolated live integration passed wrong-token `401` and valid-token `200`,
+stored error-trace discovery, complete three-backend correlation with
+`error=true`, schema/API version `1.0`, and a controlled VictoriaLogs outage
+with partial response followed by restart recovery.
+
+The previous hosted push failed; these corrections address that failure. The
+new GitHub-hosted CI and supply-chain result is pending the next push and is
+not claimed as passed here.
 
 ### Known limitations
 
@@ -68,8 +73,10 @@ they are not represented as passed here.
 버전 설치·롤백, 세 개의 읽기 전용 MCP 도구, 안전한 storage/reset 및 수동
 migration 보호를 도입했습니다. VictoriaLogs plugin v0.31.0은 지정된 SHA-256
 checksum으로 고정되며 Grafana CVE waiver는 2026-09-11에 만료됩니다.
-로컬 검증은 `make ci-local`에서 13 PASS/0 FAIL/0 SKIP을 기록했고, Gateway/MCP
-gofmt·go test·race test, release version check, live 전체 correlation 및
-VictoriaLogs 장애·복구 검증도 완료했습니다. GitHub-hosted full CI/supply-chain
-job은 push 후 pending 상태이며 통과로 주장하지 않습니다. `project.id`는 인증
-경계가 아니며 README의 기존 수치는 현재 v2.0.0 실행 증거가 아닙니다.
+로컬 CI-equivalent gate 전체를 통과했고 Gateway/MCP 포맷·테스트·race,
+project/credential 및 atomic install/symlink 검증, 전체 이력·소스 Gitleaks,
+app/Gateway Trivy HIGH/CRITICAL 0건, Grafana waiver, amd64/arm64 backend health,
+인증과 `error=true`를 포함한 3-backend correlation 및 VictoriaLogs 장애·복구를
+확인했습니다. 이전 hosted push는 실패했으며 수정 후 새 GitHub-hosted 결과는
+다음 push 뒤 pending 상태입니다. `project.id`는 인증 경계가 아니며 README의
+기존 수치는 현재 v2.0.0 실행 증거가 아닙니다.

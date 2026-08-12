@@ -16,6 +16,12 @@ logs, span attributes, exception messages, or metric labels. The Gateway strips
 control characters and projects responses, but it is not a secrecy or redaction
 policy engine; enforce redaction before emission and bound cardinality.
 
+Because this is a same-user local stack, an authorized ingest client can still
+exhaust or churn retention by sending many distinct resource values. The
+collector bounds the canonical resource/metric label set, but it cannot stop an
+authorized client from generating high-cardinality values within those fields;
+use an ingest proxy or stricter tenant policy when that threat matters.
+
 A same-user process able to read local credentials or Docker can read/alter the
 stack. For remote use add a TLS/authenticated proxy, restrict OTLP senders,
 define retention/redaction, and do not expose backend APIs directly. Grafana is

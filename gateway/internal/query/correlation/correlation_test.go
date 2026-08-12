@@ -15,6 +15,25 @@ func TestDecodeCrossProjectAndFailures(t *testing.T) {
 	}
 }
 
+func TestDecodeRecognizesErrorTagAndResponseStatus(t *testing.T) {
+	id := "0123456789abcdef0123456789abcdef"
+	raw := map[string]any{"data": []any{map[string]any{
+		"spans": []any{
+			map[string]any{"spanID": "error-string", "startTime": float64(1), "duration": float64(1), "tags": []any{map[string]any{"key": "error", "value": "true"}}},
+			map[string]any{"spanID": "error-bool", "startTime": float64(2), "duration": float64(1), "tags": []any{map[string]any{"key": "error", "value": true}}},
+			map[string]any{"spanID": "response-error", "startTime": float64(3), "duration": float64(1), "tags": []any{map[string]any{"key": "http.response.status_code", "value": float64(502)}}},
+			map[string]any{"spanID": "successful-response", "startTime": float64(4), "duration": float64(1), "tags": []any{map[string]any{"key": "http.response.status_code", "value": float64(200)}}},
+		},
+	}}}
+	r := Decode(id, raw)
+	if len(r.Failures) != 3 {
+		t.Fatalf("failures=%d want 3: %#v", len(r.Failures), r.Failures)
+	}
+	if r.Spans[3].Status == "ERROR" {
+		t.Fatalf("successful response marked error: %#v", r.Spans[3])
+	}
+}
+
 func TestDecodeJaegerOmittedReferenceTypeFindsRoot(t *testing.T) {
 	raw := map[string]any{"data": []any{map[string]any{
 		"spans": []any{

@@ -40,6 +40,21 @@ for name, svc in model.get('services', {}).items():
         if stage: stages.add(stage.lower())
     args=build.get('args',{}) if isinstance(build,dict) else {}
     if args: errors.append(f'{name}: mutable build args are not permitted')
+
+# Health probes are compiled in a BuildKit stage and copied into multi-arch
+# Victoria/OTel images.  Requiring the automatic target arguments here catches
+# the common regression where a hard-coded amd64 probe is silently copied into
+# an arm64 image.  The fallback to the builder's native Go target keeps plain
+# `docker build` usable while BuildKit supplies TARGETOS/TARGETARCH in CI.
+health_dir = root / 'backend-health'
+for df in sorted(health_dir.glob('Dockerfile.*')):
+    text = df.read_text()
+    if not re.search(r'^ARG\s+TARGETOS\s*$', text, re.M) or not re.search(r'^ARG\s+TARGETARCH\s*$', text, re.M):
+        errors.append(f'{df}: health build must declare BuildKit TARGETOS and TARGETARCH')
+    if re.search(r'GOARCH\s*=\s*amd64\b', text):
+        errors.append(f'{df}: health build must not hard-code GOARCH=amd64')
+    if not re.search(r'GOOS="\$\{TARGETOS:-\$\(go env GOOS\)\}"', text) or not re.search(r'GOARCH="\$\{TARGETARCH:-\$\(go env GOARCH\)\}"', text):
+        errors.append(f'{df}: health build must compile for TARGETOS/TARGETARCH')
 if errors:
     print('IMAGE PROVENANCE: FAIL', file=sys.stderr)
     print('\n'.join(' - '+e for e in errors), file=sys.stderr); sys.exit(1)

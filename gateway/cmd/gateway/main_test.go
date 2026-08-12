@@ -1,6 +1,7 @@
 package main
 
 import (
+	"agentotelstack/gateway/internal/query"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -8,6 +9,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestProjectIsSafeForUntrustedTelemetry(t *testing.T) {
@@ -102,6 +104,124 @@ func TestIngestForwardsOnlyProtobufAndMapsUpstream(t *testing.T) {
 	}
 }
 
+func TestIngestRejectsRedirectWithoutDisclosingBody(t *testing.T) {
+	targetHits := 0
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		targetHits++
+		_, _ = io.Copy(io.Discard, r.Body)
+	}))
+	defer target.Close()
+	redirect := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, target.URL, http.StatusTemporaryRedirect)
+	}))
+	defer redirect.Close()
+	c := config{token: "secret", upstream: redirect.URL, maxConcurrent: 1}
+	sem := make(chan struct{}, 1)
+	r := request("/v1/logs", http.MethodPost, "secret", "sensitive-telemetry")
+	r.Header.Set("Content-Type", "application/x-protobuf")
+	rr := httptest.NewRecorder()
+	if got := handleIngest(c, sem, "/v1/logs", rr, r); got != http.StatusTemporaryRedirect {
+		t.Fatalf("redirect status = %d", got)
+	}
+	if targetHits != 0 {
+		t.Fatalf("redirect target received telemetry: %d hits", targetHits)
+	}
+}
+
+func TestQueryConcurrencyIsBoundedAndExplicit(t *testing.T) {
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case entered <- struct{}{}:
+		default:
+		}
+		<-release
+		_, _ = w.Write([]byte(`{"data":[]}`))
+	}))
+	defer backend.Close()
+	c := config{
+		queryToken:         "query-secret",
+		queryMaxConcurrent: 1,
+		querySem:           make(chan struct{}, 1),
+		query:              query.Client{Traces: backend.URL},
+	}
+	h := queryHandler(c, "/v1/services")
+	firstDone := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		rr := httptest.NewRecorder()
+		h(rr, request("/v1/services", http.MethodGet, "query-secret", ""))
+		firstDone <- rr
+	}()
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		t.Fatal("first query did not reach backend")
+	}
+	second := httptest.NewRecorder()
+	h(second, request("/v1/services", http.MethodGet, "query-secret", ""))
+	if second.Code != http.StatusTooManyRequests || second.Body.String() != "query overloaded\n" || second.Header().Get("Retry-After") != "1" {
+		t.Fatalf("overload response = %d %q retry-after=%q", second.Code, second.Body.String(), second.Header().Get("Retry-After"))
+	}
+	close(release)
+	select {
+	case rr := <-firstDone:
+		if rr.Code != http.StatusOK {
+			t.Fatalf("first query status = %d", rr.Code)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("first query did not finish")
+	}
+}
+
+func TestCorrelateForwardsProjectToLogsAndMetrics(t *testing.T) {
+	var logQuery, metricsQuery string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/select/jaeger/api/traces/0123456789abcdef0123456789abcdef":
+			_, _ = w.Write([]byte(`{"data":[{"spans":[{"spanID":"span","operationName":"GET","startTime":1000000,"duration":1000,"processID":"p1"}],"processes":{"p1":{"serviceName":"api","tags":[{"key":"project","value":"123e4567-e89b-12d3-a456-426614174000"}]}}}]}`))
+		case r.URL.Path == "/select/logsql/query":
+			logQuery = r.URL.Query().Get("query")
+			_, _ = w.Write([]byte(`[{"trace_id":"0123456789abcdef0123456789abcdef"}]`))
+		case r.URL.Path == "/api/v1/query_range":
+			metricsQuery = r.URL.Query().Get("query")
+			_, _ = w.Write([]byte(`{"status":"success","data":{"resultType":"matrix","result":[{"metric":{"service_name":"api"},"values":[[1,"1"]]}]}}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	project := "123e4567-e89b-12d3-a456-426614174000"
+	c := config{
+		queryToken: "query-secret",
+		querySem:   make(chan struct{}, 1),
+		query:      query.Client{Logs: server.URL, Metrics: server.URL, Traces: server.URL},
+	}
+	r := httptest.NewRequest(http.MethodPost, "http://gateway/v1/correlate", strings.NewReader(`{"trace_id":"0123456789abcdef0123456789abcdef","project":"`+project+`"}`))
+	r.Header.Set("Authorization", "Bearer query-secret")
+	r.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	queryHandler(c, "/v1/correlate")(rr, r)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("correlate status = %d body=%s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(logQuery, `project:"`+project+`"`) {
+		t.Fatalf("correlate log query = %q", logQuery)
+	}
+	if !strings.Contains(metricsQuery, `project="`+project+`"`) {
+		t.Fatalf("correlate metrics query = %q", metricsQuery)
+	}
+	wrongProject := "223e4567-e89b-12d3-a456-426614174000"
+	wrong := httptest.NewRequest(http.MethodPost, "http://gateway/v1/correlate", strings.NewReader(`{"trace_id":"0123456789abcdef0123456789abcdef","project":"`+wrongProject+`"}`))
+	wrong.Header.Set("Authorization", "Bearer query-secret")
+	wrong.Header.Set("Content-Type", "application/json")
+	wrongRR := httptest.NewRecorder()
+	queryHandler(c, "/v1/correlate")(wrongRR, wrong)
+	if wrongRR.Code != http.StatusOK || !strings.Contains(wrongRR.Body.String(), `"status":"no_matching_data"`) || strings.Contains(wrongRR.Body.String(), `"correlation"`) {
+		t.Fatalf("wrong project correlate = %d %s", wrongRR.Code, wrongRR.Body.String())
+	}
+}
+
 func TestBodyAndContentContract(t *testing.T) {
 	c := config{token: "secret", upstream: "http://127.0.0.1:1", maxConcurrent: 1}
 	sem := make(chan struct{}, 1)
@@ -147,6 +267,23 @@ func TestLoadRejectsMissingOrEqualTokens(t *testing.T) {
 	t.Setenv("GATEWAY_QUERY_TOKEN", "same-secret")
 	if _, err := load(); err == nil {
 		t.Fatal("equal ingest/query tokens accepted")
+	}
+}
+
+func TestLoadBoundsQueryConcurrency(t *testing.T) {
+	t.Setenv("GATEWAY_INGEST_TOKEN", "secret")
+	t.Setenv("GATEWAY_QUERY_TOKEN", "different-secret")
+	t.Setenv("GATEWAY_COLLECTOR_URL", "http://collector:4318")
+	t.Setenv("GATEWAY_QUERY_MAX_CONCURRENT", "7")
+	c, err := load()
+	if err != nil || c.queryMaxConcurrent != 7 {
+		t.Fatalf("configured query concurrency = %d, err=%v", c.queryMaxConcurrent, err)
+	}
+	for _, value := range []string{"0", "129", "not-a-number"} {
+		t.Setenv("GATEWAY_QUERY_MAX_CONCURRENT", value)
+		if _, err := load(); err == nil {
+			t.Fatalf("query concurrency %q accepted", value)
+		}
 	}
 }
 

@@ -8,7 +8,7 @@ COPY package.json package-lock.json ./
 RUN npm ci --omit=dev
 
 FROM alpine:3.22@sha256:14358309a308569c32bdc37e2e0e9694be33a9d99e68afb0f5ff33cc1f695dce
-RUN apk add --no-cache libstdc++ libgcc
+RUN apk add --no-cache libstdc++=14.2.0-r6 libgcc=14.2.0-r6
 RUN addgroup -S app && adduser -S -G app app
 COPY --from=deps /usr/local/bin/node /usr/local/bin/node
 COPY --from=deps /app/node_modules /app/node_modules
@@ -20,4 +20,5 @@ RUN chown -R app:app /app
 USER app
 
 EXPOSE 3000
+HEALTHCHECK --interval=5s --timeout=3s --retries=20 CMD ["node", "-e", "require('http').get('http://127.0.0.1:3000/health', r => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"]
 CMD ["node", "--require", "./src/otel.js", "src/index.js"]

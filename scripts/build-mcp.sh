@@ -21,7 +21,6 @@ if command -v file >/dev/null 2>&1; then
     darwin/arm64) case "$desc" in *"Mach-O 64-bit"*arm64*) :;; *) echo "MCP build has unexpected file type: $desc" >&2; exit 1;; esac;;
   esac
 fi
-chmod 700 "$tmp/agentotel-mcp"
 mkdir -p "$(dirname -- "$out")"
 cp "$tmp/agentotel-mcp" "$out"; chmod 700 "$out"
 shasum -a 256 "$out" >/dev/null

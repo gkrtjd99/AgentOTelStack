@@ -1,16 +1,15 @@
 # Grafana image with the VictoriaLogs datasource baked in at build time.
 # The release URL and digest are intentionally explicit so runtime startup has
 # no network/plugin installation dependency.
-# Pin the multi-arch Ubuntu release manifest (13.1.3).  This is the latest
-# stable release available in the registry and includes current security fixes;
-# with current security fixes; keeping the digest here makes rebuilds
+# Pin the multi-arch release manifest; keeping the digest here makes rebuilds
 # reproducible and prevents an unreviewed tag update.
 FROM grafana/grafana@sha256:ab9a06d495291c7ba210426b62e9056dba6046d0945f7e9af041f3ff29b4c7fe AS plugin
 
 USER root
 
 ADD https://github.com/VictoriaMetrics/victorialogs-datasource/releases/download/v0.31.0/victoriametrics-logs-datasource-v0.31.0.tar.gz /tmp/victorialogs-datasource.tar.gz
-RUN echo '6b6d7b27354ad972946318aac2a54f04363375e7cd5d1cad9d3bb74d00eb970b  /tmp/victorialogs-datasource.tar.gz' | sha256sum -c - \
+RUN printf '%s  %s\n' '6b6d7b27354ad972946318aac2a54f04363375e7cd5d1cad9d3bb74d00eb970b' /tmp/victorialogs-datasource.tar.gz > /tmp/victorialogs-datasource.sha256 \
+    && sha256sum -c /tmp/victorialogs-datasource.sha256 \
     # Keep plugins outside /var/lib/grafana: the latter is intentionally backed
     # by the persistent data volume in compose and would mask baked plugins.
     && mkdir -p /opt/grafana-plugins \
@@ -20,11 +19,18 @@ RUN echo '6b6d7b27354ad972946318aac2a54f04363375e7cd5d1cad9d3bb74d00eb970b  /tmp
     && chmod -R a=rX /opt/grafana-plugins \
     # Restore execute permission for the platform backend binaries after the
     # read-only hardening above.
-    && chmod 0555 /opt/grafana-plugins/victoriametrics-logs-datasource/*_linux_*
+    && chmod 0555 /opt/grafana-plugins/victoriametrics-logs-datasource/*_linux_* \
+    && rm -f /tmp/victorialogs-datasource.tar.gz /tmp/victorialogs-datasource.sha256
+USER 472
 
 FROM grafana/grafana@sha256:ab9a06d495291c7ba210426b62e9056dba6046d0945f7e9af041f3ff29b4c7fe
 
 COPY --from=plugin --chown=472:0 /opt/grafana-plugins /opt/grafana-plugins
+# Keep the exact upstream identity in the image metadata.  The Trivy waiver
+# gate checks this label on the locally-built image; the local Compose name is
+# intentionally not treated as Grafana's upstream identity.
+LABEL org.opencontainers.image.base.name="grafana/grafana" \
+      org.opencontainers.image.base.digest="sha256:ab9a06d495291c7ba210426b62e9056dba6046d0945f7e9af041f3ff29b4c7fe"
 # Grafana 12 enables external core-plugin management by default. Keep this
 # image self-contained: only the verified plugin above may be loaded, and no
 # startup catalog/preinstall/update fetch is needed for this stack.

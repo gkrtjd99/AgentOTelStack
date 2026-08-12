@@ -15,14 +15,24 @@ make up
 make doctor
 ```
 
+`make install` creates a 0600 credential store containing distinct Gateway
+ingest/query tokens and the Grafana admin password. A source checkout that has
+not been installed can initialize the same store with
+`./bin/obs credentials ensure` (or `make setup` does this automatically).
+Compose targets load those values in-process; secrets are not printed or
+written to a repository `.env` file. Existing `GATEWAY_*`/`GF_*` environment
+values remain supported as explicit operator overrides.
+
 `make setup` creates and labels the exact persistent volumes. `make up` starts
-the shared seven-service runtime: Gateway, collector, queue initializer, and
+the shared six-service runtime: Gateway, collector, queue initializer, and
 the three Victoria backends (the sample app is off). Use `make demo` when the
 bundled sample app is wanted.
 
 The launcher and runtime are installed under the XDG agentotel directories and
 can be invoked from another directory. Query credentials are read from the
-agentotel credential store; keep ingest and query tokens out of source control.
+agentotel credential store; keep ingest/query tokens and the Grafana password
+out of source control. Query helpers can be run from any checkout with
+`./bin/obs credentials run -- ./obs/context.sh my-app`.
 See [`CONNECT.md`](./CONNECT.md) for app configuration and MCP setup.
 
 The installed MCP command is `${XDG_DATA_HOME:-$HOME/.local/share}/agentotel/current/bin/agentotel-mcp`.

@@ -35,7 +35,7 @@ jobs:
         run: |
           test_scripts=()
           while IFS= read -r -d '' script; do test_scripts+=("$script"); done < <(find tests -type f -name '*.sh' -print0)
-          docker run --rm -v "$PWD:/src" -w /src koalaman/shellcheck-alpine:v0.10.0 shellcheck -x -e SC1091 bin/obs obs/*.sh libexec/agentotel/*.sh scripts/*.sh workload/*.sh "${test_scripts[@]}"
+          docker run --rm -v "$PWD:/src" -w /src koalaman/shellcheck-alpine:v0.10.0@sha256:5921d946dac740cbeec2fb1c898747b6105e585130cc7f0602eec9a10f7ddb63 shellcheck -x -e SC1091 bin/obs obs/*.sh libexec/agentotel/*.sh scripts/*.sh workload/*.sh "${test_scripts[@]}"
       - name: Go format
         run: docker run --rm -v "$PWD/gateway:/src" -w /src golang:1.26.5-bookworm@sha256:53eeac89074db483fdf0ab3be1df32bf6e47562263d2d0d6baa7f26acb4957dd gofmt -d -e .
       - name: Go tests and race
@@ -54,8 +54,9 @@ jobs:
           ./scripts/test-security.sh
           ./scripts/test-cardinality.sh
           ./scripts/test-storage-pressure.sh
+          ./security/test-trivy-waivers.sh
       - name: dependency audit
-        run: docker run --rm -v "$PWD/app:/app" -w /app node:22-alpine sh -c 'npm ci && npm audit --audit-level=high'
+        run: docker run --rm -v "$PWD/app:/app" -w /app node:22-alpine@sha256:c610fcdfb1d5b4740dd70c284ed3cb16bb857e0f7166196e36a5501df7a3aa32 sh -c 'npm ci && npm audit --audit-level=high'
       - name: e2e dependency audit
         run: |
           cd e2e
@@ -84,7 +85,8 @@ jobs:
       - name: image digest and Dockerfile lint
         run: |
           ./scripts/verify-image-provenance.sh
-          docker run --rm -v "$PWD:/src" -w /src hadolint/hadolint:2.12.0 hadolint app/Dockerfile gateway/Dockerfile grafana/Dockerfile
+          ./scripts/test-backend-health.sh
+          docker run --rm -v "$PWD:/src" -w /src hadolint/hadolint:2.12.0@sha256:30a8fd2e785ab6176eed53f74769e04f125afb2f74a6c52aef7d463583b6d45e hadolint app/Dockerfile gateway/Dockerfile grafana/Dockerfile
       - name: VictoriaLogs plugin supply-chain gate
         run: |
           if ! grep -Fq 'victoriametrics-logs-datasource-v0.31.0.tar.gz' grafana/Dockerfile; then exit 1; fi
@@ -104,7 +106,7 @@ jobs:
       contents: read
     env:
       COMPOSE_PROJECT_NAME: agentotel-ci-${{ github.run_id }}-${{ github.run_attempt }}
-      AGENTOTEL_STACK_UUID: ${{ format('{0}-0000-4000-8000-000000000001', github.run_id) }}
+      AGENTOTEL_STACK_UUID: 00000000-0000-4000-8000-000000000001
       GATEWAY_INGEST_TOKEN: ci-live-ingest-${{ github.run_id }}
       GATEWAY_QUERY_TOKEN: ci-live-query-${{ github.run_id }}
       GF_SECURITY_ADMIN_PASSWORD: ci-live-grafana-${{ github.run_id }}
@@ -120,6 +122,8 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+        with:
+          fetch-depth: 0
       - name: Go vulnerability gate (pinned tool)
         run: |
           docker run --rm -v "$PWD/gateway:/src" -w /src golang:1.26.5-bookworm@sha256:53eeac89074db483fdf0ab3be1df32bf6e47562263d2d0d6baa7f26acb4957dd \
@@ -138,7 +142,7 @@ jobs:
           for image in agentotel-supply-${{ github.run_id }}-app agentotel-supply-${{ github.run_id }}-gateway agentotel-supply-${{ github.run_id }}-grafana; do
             if [[ "$image" == *-grafana ]]; then
               docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v "$PWD:/src" -w /src aquasec/trivy:0.73.0@sha256:7cced7cae583819fc7806d4cbc0dbbc7cad18b99f7d3e235192e6da8c091045c image --format json --severity HIGH,CRITICAL "$image" > artifacts/grafana-trivy.json
-              TRIVY_REPORT=artifacts/grafana-trivy.json WAIVER_AS_OF=2026-08-12 ./scripts/verify-trivy-waivers.sh "$image" artifacts/grafana-trivy.json
+              TRIVY_REPORT=artifacts/grafana-trivy.json ./scripts/verify-trivy-waivers.sh "$image" artifacts/grafana-trivy.json
             else
               docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy:0.73.0@sha256:7cced7cae583819fc7806d4cbc0dbbc7cad18b99f7d3e235192e6da8c091045c image --exit-code 1 --severity HIGH,CRITICAL "$image"
             fi
@@ -151,8 +155,10 @@ jobs:
           path: artifacts/
       - name: Action workflow lint (pinned image)
         run: docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.12@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667
-      - name: Secret scan (pinned gitleaks)
-        run: docker run --rm -v "$PWD:/repo" zricethezav/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f detect --source=/repo --redact --no-banner
+      - name: Secret scan (pinned gitleaks history)
+        run: docker run --rm -v "$PWD:/repo" zricethezav/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f detect --config=/repo/.gitleaks.toml --source=/repo --redact --no-banner
+      - name: Secret scan (pinned gitleaks working tree)
+        run: docker run --rm -v "$PWD:/repo" zricethezav/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f dir --config=/repo/.gitleaks.toml --max-target-megabytes=5 --redact --no-banner /repo
       - name: Cleanup scan project
         if: always()
         run: docker compose --project-name agentotel-supply-${{ github.run_id }} --profile demo --profile dashboard down -v --remove-orphans || true

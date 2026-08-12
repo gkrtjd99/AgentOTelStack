@@ -156,10 +156,13 @@ func spanStatus(m map[string]any) string {
 			q, _ := v.(map[string]any)
 			k := str(q["key"])
 			val := str(q["value"])
+			if k == "error" && truthy(q["value"]) {
+				return "ERROR"
+			}
 			if k == "otel.status_code" && strings.EqualFold(val, "ERROR") {
 				return "ERROR"
 			}
-			if k == "http.status_code" {
+			if k == "http.status_code" || k == "http.response.status_code" {
 				n := number(q["value"])
 				if n >= 400 {
 					return "ERROR"
@@ -173,6 +176,16 @@ func spanStatus(m map[string]any) string {
 		}
 	}
 	return ""
+}
+func truthy(v any) bool {
+	switch x := v.(type) {
+	case bool:
+		return x
+	case string:
+		return strings.EqualFold(x, "true")
+	default:
+		return false
+	}
 }
 func processProject(m map[string]any) string {
 	if p := str(m["project"]); p != "" {

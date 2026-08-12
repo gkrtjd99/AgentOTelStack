@@ -1,0 +1,18 @@
+# The release commit contains two intentionally deterministic wrong-token
+# authentication probes. Keep the exception exact: one published commit, one
+# file, one rule, and the complete literal probe line. Any other curl auth
+# header remains a finding.
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "release v2 deterministic negative-auth fixtures only"
+targetRules = ["curl-auth-header"]
+commits = ["230bd9495113842e2531bc0344d4985684d945bc"]
+paths = ["^scripts/test-ci-integration\\.sh$"]
+regexTarget = "match"
+regexes = [
+  "curl --connect-timeout 2 --max-time 5 -sS -o /dev/null -w '%\\{http_code\\}' -H 'Authorization: Bearer ci-definitely-wrong-token'",
+  "curl --connect-timeout 2 --max-time 5 -sS -o \\\"\\$diag_body\\\" -w '%\\{http_code\\}' -H 'Authorization: Bearer ci-definitely-wrong-token'",
+]
+condition = "AND"

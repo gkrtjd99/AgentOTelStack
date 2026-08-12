@@ -111,6 +111,17 @@ rendered_query_fp="$(token_fingerprint "$rendered_query_token")"
 container_query_token="$(docker inspect "${COMPOSE_PROJECT_NAME}-gateway-1" -f '{{range .Config.Env}}{{println .}}{{end}}' | awk -F= '$1 == "GATEWAY_QUERY_TOKEN" {sub(/^[^=]*=/, ""); print; exit}')"
 container_query_fp="$(token_fingerprint "$container_query_token")"
 curl_bearer_payload="Bearer ${ci_query_token}"
+wrong_bearer_payload="Bearer ci-definitely-wrong-token"
+auth_probe() {
+  local bearer="$1" endpoint="$2"
+  curl --connect-timeout 2 --max-time 5 -sS -o /dev/null -w '%{http_code}' \
+    --header "$(printf 'Authorization: %s' "$bearer")" "$endpoint" || true
+}
+auth_probe_to_file() {
+  local bearer="$1" endpoint="$2" output="$3"
+  curl --connect-timeout 2 --max-time 5 -sS -o "$output" -w '%{http_code}' \
+    --header "$(printf 'Authorization: %s' "$bearer")" "$endpoint" || true
+}
 curl_query_fp="$(token_fingerprint "${curl_bearer_payload#Bearer }")"
 printf 'gateway query-token fingerprints: script-env=%s rendered-compose=%s container-env=%s curl-bearer=%s\n' \
   "$script_query_fp" "$rendered_query_fp" "$container_query_fp" "$curl_query_fp"
@@ -121,16 +132,16 @@ printf 'gateway query-token fingerprints: script-env=%s rendered-compose=%s cont
 # First prove the query listener itself is live and authenticates independently
 # of backend warmup. Then wait separately for the traces-backed services query.
 for _ in $(seq 1 "$ci_ready_timeout"); do
-  wrong_health_status="$(curl --connect-timeout 2 --max-time 5 -sS -o /dev/null -w '%{http_code}' -H 'Authorization: Bearer ci-definitely-wrong-token' "$GATEWAY_URL/v1/health" || true)"
-  right_health_status="$(curl --connect-timeout 2 --max-time 5 -sS -o /dev/null -w '%{http_code}' -H "Authorization: $curl_bearer_payload" "$GATEWAY_URL/v1/health" || true)"
+  wrong_health_status="$(auth_probe "$wrong_bearer_payload" "$GATEWAY_URL/v1/health")"
+  right_health_status="$(auth_probe "$curl_bearer_payload" "$GATEWAY_URL/v1/health")"
   [[ "$wrong_health_status" == 401 && "$right_health_status" == 200 ]] && break
   sleep 1
 done
 if [[ "$wrong_health_status" != 401 || "$right_health_status" != 200 ]]; then
   echo "FAIL: query health did not authenticate with the current query token (wrong_http=$wrong_health_status right_http=$right_health_status)" >&2
   diag_body="$(mktemp "${TMPDIR:-/tmp}/agentotel-ci-auth.XXXXXX")"
-  wrong_probe="$(curl --connect-timeout 2 --max-time 5 -sS -o "$diag_body" -w '%{http_code}' -H 'Authorization: Bearer ci-definitely-wrong-token' "$GATEWAY_URL/v1/health" || true)"
-  right_probe="$(curl --connect-timeout 2 --max-time 5 -sS -o "$diag_body" -w '%{http_code}' -H "Authorization: $curl_bearer_payload" "$GATEWAY_URL/v1/health" || true)"
+  wrong_probe="$(auth_probe_to_file "$wrong_bearer_payload" "$GATEWAY_URL/v1/health" "$diag_body")"
+  right_probe="$(auth_probe_to_file "$curl_bearer_payload" "$GATEWAY_URL/v1/health" "$diag_body")"
   printf 'auth probe: expected=127.0.0.1:%s actual=%s wrong_http=%s right_http=%s\n' \
     "$GATEWAY_QUERY_HOST_PORT" "$gateway_port_mapping" "$wrong_probe" "$right_probe" >&2
   echo 'auth probe response body (safe, truncated):' >&2; head -c 512 "$diag_body" >&2 || true; echo >&2
