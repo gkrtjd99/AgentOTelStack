@@ -49,8 +49,8 @@ These are optional inspection tools. The supported automation path remains
 | Signal | URL | Notes |
 |---|---|---|
 | Metrics | <http://localhost:8428/vmui/> | VictoriaMetrics MetricsQL/PromQL UI |
-| Logs | <http://localhost:9428/select/vmui/> | VictoriaLogs UI |
-| Traces | <http://localhost:10428/select/jaeger/> | Jaeger-compatible trace UI, when available |
+| Logs | — | Use `./obs/logs.sh` or the Gateway API; VictoriaLogs is internal |
+| Traces | — | Use `./obs/traces.sh` or the Gateway API; VictoriaTraces is internal |
 
 If a UI endpoint changes in a Victoria release, the script helpers are still the
 source of truth because they call the query APIs directly.
@@ -73,7 +73,7 @@ service. The helper hides that backend-specific spelling.
 ## Optional Grafana UI
 
 Grafana is behind the `dashboard` compose profile, so the default `make up`
-stack remains collector + Victoria stores only.
+stack remains the seven-service runtime (with the sample app profile off).
 
 Run:
 
@@ -91,17 +91,24 @@ Provisioned datasources:
 | Name | Type | Backend |
 |---|---|---|
 | VictoriaMetrics | Prometheus-compatible | `http://victoriametrics:8428` |
-| VictoriaLogs | `victoriametrics-logs-datasource` | `http://victorialogs:9428` |
-| VictoriaTraces | Jaeger | `http://victoriatraces:10428/select/jaeger` |
+| VictoriaTraces | Jaeger-compatible | `http://victoriatraces:10428/select/jaeger` |
+| VictoriaLogs | `victoriametrics-logs-datasource` v0.31.0 | `http://victorialogs:9428` |
 
 The Grafana dashboard is versioned at
 [`dashboards/local-observability.json`](../dashboards/local-observability.json).
-It includes request rate, HTTP p95, order metrics, recent error logs, and links
+The Grafana 13.1.3 Ubuntu image is pinned by SHA-256 digest and bakes the
+official VictoriaLogs datasource plugin v0.31.0 at build time with a pinned
+release checksum. Plugins are loaded from immutable `/opt/grafana-plugins`,
+outside the persistent `/var/lib/grafana` volume, so the data volume cannot
+mask the plugin. Startup preinstall, external core-plugin management, public
+key retrieval, and the plugin admin installer are disabled; the dashboard
+image does not download plugins at startup. The dashboard includes request rate, HTTP p95, order metrics, recent
+error logs, and links
 back to the Victoria UIs plus the `obs/correlate.sh` workflow.
 
-Grafana is local-only and bound to `127.0.0.1:3001`. Anonymous viewer access is
-enabled for the local dashboard; admin credentials default to `admin` / `admin`
-inside this development stack.
+Grafana is local-only and bound to `127.0.0.1:3001`. Anonymous access is off;
+login requires the configured `GF_SECURITY_ADMIN_PASSWORD` (the username
+defaults to `admin`). No default admin password is documented or assumed.
 
 ### Grafana Usage Examples
 

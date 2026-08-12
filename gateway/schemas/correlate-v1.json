@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Trace correlation v1",
+  "type": "object",
+  "required": ["schema_version", "data", "partial", "truncated", "content_trust", "backends"],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "partial": {"type": "boolean"},
+    "truncated": {"type": "boolean"},
+    "content_trust": {"const": "untrusted_telemetry"},
+    "backends": {"type": "array", "items": {"type": "object", "required": ["name", "status"], "properties": {"name": {"type": "string"}, "status": {"type": "string", "enum": ["ok", "trace_not_stored", "signal_not_observed", "no_matching", "no_matching_data", "backend_unavailable", "backend_decode_error", "timeout", "partial", "telemetry_incomplete"]}, "error": {"type": "string"}}}},
+    "data": {"type": "object", "properties": {
+      "correlation": {"type": "object", "required": ["trace_id", "spans"], "properties": {
+        "trace_id": {"type": "string", "pattern": "^[0-9a-f]{32}$"},
+        "spans": {"type": "array"}, "services": {"type": "array"},
+        "projects": {"type": "array"}, "indicators": {"type": "array"}
+      }}
+    }}
+  }
+}

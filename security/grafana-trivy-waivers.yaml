@@ -1,0 +1,9 @@
+# Canonical policy is security/grafana-trivy-waivers.json; this YAML mirrors it
+# for reviewers and security tooling. Keep both files synchronized.
+policy: grafana-upstream-cve-waiver-v1
+image: grafana/grafana@sha256:ab9a06d495291c7ba210426b62e9056dba6046d0945f7e9af041f3ff29b4c7fe
+expires: 2026-09-11
+owner: platform-security
+upstreamEvidence: official Grafana release/image checked 2026-08-12; no patched image is available.
+reachabilityControls: dashboard-only internal-network service; anonymous access, plugin installation, catalog/key retrieval and update checks disabled.
+# Entries and exact package metadata are authoritative in the JSON file.

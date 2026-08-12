@@ -63,10 +63,6 @@
         "type": "__expr__",
         "uid": "__expr__"
       },
-      "fieldConfig": {
-        "defaults": {},
-        "overrides": []
-      },
       "gridPos": {
         "h": 5,
         "w": 24,
@@ -640,30 +636,21 @@
       },
       "id": 9,
       "options": {
-        "dedupStrategy": "none",
-        "enableLogDetails": true,
-        "prettifyLogMessage": false,
-        "showCommonLabels": false,
-        "showLabels": true,
         "showTime": true,
-        "sortOrder": "Descending",
-        "wrapLogMessage": false
+        "showCommonLabels": false,
+        "wrapLines": false,
+        "prettifyLogMessage": false,
+        "enableLogDetails": true,
+        "sortOrder": "Descending"
       },
-      "pluginVersion": "12.2.5",
       "targets": [
         {
-          "datasource": {
-            "type": "victoriametrics-logs-datasource",
-            "uid": "victorialogs"
-          },
-          "direction": "desc",
-          "editorMode": "code",
-          "expr": "_time:1h service.name:$service severity_text:error | fields _time, _msg, req.url, forced, trace_id",
-          "maxLines": 20,
-          "queryType": "instant",
+          "expr": "_time:15m service.name:\"$service\" severity_text:\"error\"",
           "refId": "A"
         }
       ],
+      "fieldConfig": {"defaults": {}, "overrides": []},
+      "pluginVersion": "12.2.5",
       "title": "Recent Error Logs",
       "type": "logs"
     }

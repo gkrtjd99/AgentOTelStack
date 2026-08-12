@@ -12,9 +12,38 @@ const { metrics, trace } = require("@opentelemetry/api");
 
 const path = require("path");
 
+const safeReq = (req) => ({ method: req.method, url: req.url });
+const safeRes = (res) => ({ statusCode: res.statusCode });
+
 const app = express();
-const logger = require("pino")({ level: "info" });
-app.use(pinoHttp({ logger }));
+const logger = require("pino")({
+  level: "info",
+  // Keep request logging useful without serializing headers, cookies, bodies,
+  // or error stacks into either stdout or the OTLP LogRecord attributes.
+  serializers: {
+    req: safeReq,
+    res: safeRes,
+    err: (err) => ({ type: err.type, message: err.message }),
+  },
+  redact: {
+    paths: [
+      "req.headers.authorization",
+      "req.headers.cookie",
+      "req.headers.*",
+      "headers.authorization",
+      "headers.cookie",
+      "body",
+      "request.body",
+      "response.body",
+      "password",
+      "secret",
+      "api_key",
+      "token",
+    ],
+    censor: "[REDACTED]",
+  },
+});
+app.use(pinoHttp({ logger, serializers: { req: safeReq, res: safeRes } }));
 
 // Minimal UI so the e2e runner has a real browser journey to drive.
 app.use(express.static(path.join(__dirname, "..", "public")));

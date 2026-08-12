@@ -1,0 +1,42 @@
+# Grafana image with the VictoriaLogs datasource baked in at build time.
+# The release URL and digest are intentionally explicit so runtime startup has
+# no network/plugin installation dependency.
+# Pin the multi-arch Ubuntu release manifest (13.1.3).  This is the latest
+# stable release available in the registry and includes current security fixes;
+# with current security fixes; keeping the digest here makes rebuilds
+# reproducible and prevents an unreviewed tag update.
+FROM grafana/grafana@sha256:ab9a06d495291c7ba210426b62e9056dba6046d0945f7e9af041f3ff29b4c7fe AS plugin
+
+USER root
+
+ADD https://github.com/VictoriaMetrics/victorialogs-datasource/releases/download/v0.31.0/victoriametrics-logs-datasource-v0.31.0.tar.gz /tmp/victorialogs-datasource.tar.gz
+RUN echo '6b6d7b27354ad972946318aac2a54f04363375e7cd5d1cad9d3bb74d00eb970b  /tmp/victorialogs-datasource.tar.gz' | sha256sum -c - \
+    # Keep plugins outside /var/lib/grafana: the latter is intentionally backed
+    # by the persistent data volume in compose and would mask baked plugins.
+    && mkdir -p /opt/grafana-plugins \
+    && tar -xzf /tmp/victorialogs-datasource.tar.gz -C /opt/grafana-plugins \
+    && test -f /opt/grafana-plugins/victoriametrics-logs-datasource/plugin.json \
+    && chown -R 472:0 /opt/grafana-plugins \
+    && chmod -R a=rX /opt/grafana-plugins \
+    # Restore execute permission for the platform backend binaries after the
+    # read-only hardening above.
+    && chmod 0555 /opt/grafana-plugins/victoriametrics-logs-datasource/*_linux_*
+
+FROM grafana/grafana@sha256:ab9a06d495291c7ba210426b62e9056dba6046d0945f7e9af041f3ff29b4c7fe
+
+COPY --from=plugin --chown=472:0 /opt/grafana-plugins /opt/grafana-plugins
+# Grafana 12 enables external core-plugin management by default. Keep this
+# image self-contained: only the verified plugin above may be loaded, and no
+# startup catalog/preinstall/update fetch is needed for this stack.
+USER root
+RUN printf '%s\n' '[feature_toggles]' 'externalCorePlugins = false' '[plugins]' 'plugin_admin_enabled = false' 'plugin_catalog_url =' 'public_key_retrieval_disabled = true' 'public_key_retrieval_on_startup = false' 'preinstall =' 'preinstall_sync =' 'preinstall_disabled = true' 'preinstall_auto_update = false' '[analytics]' 'check_for_updates = false' 'check_for_plugin_updates = false' > /etc/grafana/grafana.ini \
+    && chown 472:0 /etc/grafana/grafana.ini \
+    && chmod 0444 /etc/grafana/grafana.ini
+USER 472
+ENV GF_PATHS_PLUGINS=/opt/grafana-plugins
+ENV GF_PLUGINS_PREINSTALL_SYNC=""
+ENV GF_PLUGINS_PREINSTALL_DISABLED="true"
+ENV GF_PLUGINS_PLUGIN_ADMIN_ENABLED="false"
+ENV GF_PLUGINS_PUBLIC_KEY_RETRIEVAL_DISABLED="true"
+ENV GF_ANALYTICS_CHECK_FOR_UPDATES="false"
+ENV GF_ANALYTICS_CHECK_FOR_PLUGIN_UPDATES="false"

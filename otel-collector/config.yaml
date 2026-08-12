@@ -10,36 +10,260 @@ receivers:
         endpoint: 0.0.0.0:4318
 
 processors:
+  # Keep the collector bounded when an exporter or backend is unavailable.
+  # This must remain the first processor in every pipeline.
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 256
+    spike_limit_mib: 64
+
+  # Resource shaping is intentionally fail-closed for stream identity.  Only
+  # the low-cardinality project/service/environment dimensions are retained;
+  # run/checkout/machine/branch/commit/instance IDs must never become labels.
+  resource/sanitize:
+    attributes:
+      - key: project
+        from_attribute: agentotel.project.id
+        action: upsert
+      - key: agentotel.project.id
+        action: delete
+      - key: project
+        from_attribute: project.name
+        action: upsert
+      - key: project.name
+        action: delete
+      - key: service.namespace
+        action: delete
+      - key: service.version
+        action: delete
+      - key: deployment.environment.name
+        action: delete
+      - key: service.instance.id
+        action: delete
+      - key: host.id
+        action: delete
+      - key: host.name
+        action: delete
+      - key: host.arch
+        action: delete
+      - key: os.type
+        action: delete
+      - key: os.version
+        action: delete
+      - key: process.pid
+        action: delete
+      - key: process.parent_pid
+        action: delete
+      - key: process.executable.path
+        action: delete
+      - key: process.command_line
+        action: delete
+      - key: run_id
+        action: delete
+      - key: run.id
+        action: delete
+      - key: smoke.run_id
+        action: delete
+      - key: checkout_id
+        action: delete
+      - key: checkout.id
+        action: delete
+      - key: machine_id
+        action: delete
+      - key: machine.id
+        action: delete
+      - key: branch
+        action: delete
+      - key: commit
+        action: delete
+      - key: vcs.ref.head.revision
+        action: delete
+      - key: vcs.repository.ref.revision
+        action: delete
+
+  # Common attribute/body shaping after redaction. Keep resource attributes
+  # restricted even if a future SDK adds a new high-cardinality resource key.
+  transform/resource-allowlist:
+    error_mode: propagate
+    trace_statements:
+      - keep_keys(resource.attributes, ["project", "service.name", "deployment.environment"])
+    metric_statements:
+      - keep_keys(resource.attributes, ["project", "service.name", "deployment.environment"])
+    log_statements:
+      - keep_keys(resource.attributes, ["project", "service.name", "deployment.environment"])
+
+  transform/log-sanitize:
+    # Propagate OTTL failures so a newly introduced field cannot silently skip
+    # the redaction gate.  The collector must fail closed on invalid config.
+    error_mode: propagate
+    log_statements:
+      - context: log
+        statements:
+          - delete_key(attributes, "http.request.body")
+          - delete_key(attributes, "http.response.body")
+          - delete_key(attributes, "request.body")
+          - delete_key(attributes, "response.body")
+          - delete_key(attributes, "db.statement")
+          - delete_key(attributes, "db.query.text")
+          - delete_key(attributes, "gen_ai.prompt")
+          - delete_key(attributes, "gen_ai.completion")
+          - delete_key(attributes, "gen_ai.input.messages")
+          - delete_key(attributes, "gen_ai.output.messages")
+          - delete_key(attributes, "authorization")
+          - delete_key(attributes, "cookie")
+          - delete_key(attributes, "api_key")
+          - delete_key(attributes, "api.key")
+          - delete_key(attributes, "vcs.repository.url.full")
+          - delete_key(attributes, "vcs.repository.url")
+          - delete_key(attributes, "vcs.user")
+          - replace_pattern(attributes["http.url"], "[?#].*$", "") where attributes["http.url"] != nil
+          - replace_pattern(attributes["url.full"], "[?#].*$", "") where attributes["url.full"] != nil
+          - replace_pattern(attributes["http.request.header.authorization"], ".+", "[REDACTED]") where attributes["http.request.header.authorization"] != nil
+          - replace_pattern(attributes["http.request.header.cookie"], ".+", "[REDACTED]") where attributes["http.request.header.cookie"] != nil
+          - replace_pattern(body, "(?i)(authorization|cookie|api[_-]?key|access[_-]?token|password|secret)[=:][^,; ]+", "$1=[REDACTED]") where IsString(body)
+          - replace_pattern(body, "(?i)(https?://[^?#\\s]+)[?#][^\\s]*", "$1") where IsString(body)
+
+  transform/metric-sanitize:
+    error_mode: propagate
+    metric_statements:
+      - context: datapoint
+        statements:
+          - delete_key(attributes, "run_id")
+          - delete_key(attributes, "run.id")
+          - delete_key(attributes, "checkout_id")
+          - delete_key(attributes, "checkout.id")
+          - delete_key(attributes, "machine_id")
+          - delete_key(attributes, "machine.id")
+          - delete_key(attributes, "branch")
+          - delete_key(attributes, "commit")
+          - delete_key(attributes, "instance")
+          - delete_key(attributes, "instance_id")
+          - delete_key(attributes, "http.url")
+          - delete_key(attributes, "url.full")
+          - delete_key(attributes, "db.statement")
+          - delete_key(attributes, "gen_ai.prompt")
+          - delete_key(attributes, "gen_ai.completion")
+          - delete_key(attributes, "gen_ai.input.messages")
+          - delete_key(attributes, "gen_ai.output.messages")
+
+  transform/trace-sanitize:
+    error_mode: propagate
+    trace_statements:
+      - context: span
+        statements:
+          - delete_key(attributes, "http.request.body")
+          - delete_key(attributes, "http.response.body")
+          - delete_key(attributes, "request.body")
+          - delete_key(attributes, "response.body")
+          - delete_key(attributes, "db.statement")
+          - delete_key(attributes, "db.query.text")
+          - delete_key(attributes, "gen_ai.prompt")
+          - delete_key(attributes, "gen_ai.completion")
+          - delete_key(attributes, "gen_ai.input.messages")
+          - delete_key(attributes, "gen_ai.output.messages")
+          - replace_pattern(attributes["http.request.header.authorization"], ".+", "[REDACTED]") where attributes["http.request.header.authorization"] != nil
+          - replace_pattern(attributes["http.request.header.cookie"], ".+", "[REDACTED]") where attributes["http.request.header.cookie"] != nil
+          - replace_pattern(attributes["http.url"], "[?#].*$", "") where attributes["http.url"] != nil
+          - replace_pattern(attributes["http.target"], "[?#].*$", "") where attributes["http.target"] != nil
+          - replace_pattern(attributes["url.full"], "[?#].*$", "") where attributes["url.full"] != nil
+          - delete_key(attributes, "vcs.repository.url.full")
+          - delete_key(attributes, "vcs.repository.url")
+          - delete_key(attributes, "vcs.user")
+          - delete_key(attributes, "vcs.ref.head.name")
+      - context: spanevent
+        statements:
+          - delete_key(attributes, "http.request.body")
+          - delete_key(attributes, "http.response.body")
+          - delete_key(attributes, "request.body")
+          - delete_key(attributes, "response.body")
+          - delete_key(attributes, "db.statement")
+          - delete_key(attributes, "db.query.text")
+          - delete_key(attributes, "gen_ai.prompt")
+          - delete_key(attributes, "gen_ai.completion")
+          - delete_key(attributes, "gen_ai.input.messages")
+          - delete_key(attributes, "gen_ai.output.messages")
+          - delete_key(attributes, "authorization")
+          - delete_key(attributes, "cookie")
+          - delete_key(attributes, "api_key")
+          - delete_key(attributes, "api.key")
+          - delete_key(attributes, "vcs.repository.url.full")
+          - delete_key(attributes, "vcs.repository.url")
+          - delete_key(attributes, "vcs.user")
+          - replace_pattern(attributes["http.request.header.authorization"], ".+", "[REDACTED]") where attributes["http.request.header.authorization"] != nil
+          - replace_pattern(attributes["http.request.header.cookie"], ".+", "[REDACTED]") where attributes["http.request.header.cookie"] != nil
+          - replace_pattern(attributes["http.url"], "[?#].*$", "") where attributes["http.url"] != nil
+          - replace_pattern(attributes["url.full"], "[?#].*$", "") where attributes["url.full"] != nil
+
   batch:
     timeout: 5s
     send_batch_size: 1024
-  # Keep host/process resource attributes that the SDK attaches.
+
   resource_detection:
     detectors: [env]
     timeout: 2s
+
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+  file_storage:
+    directory: /var/lib/otelcol/queue
+    create_directory: true
 
 exporters:
   # Logs -> VictoriaLogs OTLP endpoint
   otlp_http/vlogs:
     logs_endpoint: http://victorialogs:9428/insert/opentelemetry/v1/logs
+    # VictoriaLogs treats resource attributes as stream fields by default;
+    # pin the canonical low-cardinality set explicitly at the exporter boundary.
+    headers:
+      VL-Stream-Fields: project,service.name,deployment.environment
     tls:
       insecure: true
+    timeout: 10s
+    sending_queue:
+      enabled: true
+      num_consumers: 2
+      queue_size: 1000
+      storage: file_storage
+    retry_on_failure:
+      enabled: true
+      initial_interval: 1s
+      max_interval: 10s
+      max_elapsed_time: 30s
 
   # Metrics -> VictoriaMetrics OTLP endpoint
   otlp_http/vmetrics:
     metrics_endpoint: http://victoriametrics:8428/opentelemetry/v1/metrics
     tls:
       insecure: true
+    timeout: 10s
+    sending_queue:
+      enabled: true
+      num_consumers: 2
+      queue_size: 1000
+      storage: file_storage
+    retry_on_failure:
+      enabled: true
+      initial_interval: 1s
+      max_interval: 10s
+      max_elapsed_time: 30s
 
   # Traces -> VictoriaTraces OTLP endpoint
   otlp_http/vtraces:
     traces_endpoint: http://victoriatraces:10428/insert/opentelemetry/v1/traces
     tls:
       insecure: true
-
-  # Console echo for local debugging (`docker compose logs otel-collector`)
-  debug:
-    verbosity: basic
+    timeout: 10s
+    sending_queue:
+      enabled: true
+      num_consumers: 2
+      queue_size: 1000
+      storage: file_storage
+    retry_on_failure:
+      enabled: true
+      initial_interval: 1s
+      max_interval: 10s
+      max_elapsed_time: 30s
 
 service:
   telemetry:
@@ -48,13 +272,14 @@ service:
   pipelines:
     logs:
       receivers: [otlp]
-      processors: [resource_detection, batch]
-      exporters: [otlp_http/vlogs, debug]
+      processors: [memory_limiter, resource_detection, resource/sanitize, transform/resource-allowlist, transform/log-sanitize, batch]
+      exporters: [otlp_http/vlogs]
     metrics:
       receivers: [otlp]
-      processors: [resource_detection, batch]
-      exporters: [otlp_http/vmetrics, debug]
+      processors: [memory_limiter, resource_detection, resource/sanitize, transform/resource-allowlist, transform/metric-sanitize, batch]
+      exporters: [otlp_http/vmetrics]
     traces:
       receivers: [otlp]
-      processors: [resource_detection, batch]
-      exporters: [otlp_http/vtraces, debug]
+      processors: [memory_limiter, resource_detection, resource/sanitize, transform/resource-allowlist, transform/trace-sanitize, batch]
+      exporters: [otlp_http/vtraces]
+  extensions: [file_storage, health_check]

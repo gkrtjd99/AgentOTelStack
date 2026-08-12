@@ -1,0 +1,23 @@
+{
+  "policy": "grafana-upstream-cve-waiver-v1",
+  "image": "grafana/grafana@sha256:ab9a06d495291c7ba210426b62e9056dba6046d0945f7e9af041f3ff29b4c7fe",
+  "scanTimestamp": "2026-08-12T03:11:03Z",
+  "owner": "platform-security",
+  "waivers": [
+    {"VulnerabilityID":"CVE-2026-21728","PkgName":"github.com/grafana/tempo","InstalledVersion":"v1.5.1-0.20260427112133-525d1bab07e0","FixedVersion":"2.8.4, 2.9.2, 2.10.2"},
+    {"VulnerabilityID":"CVE-2026-28377","PkgName":"github.com/grafana/tempo","InstalledVersion":"v1.5.1-0.20260427112133-525d1bab07e0","FixedVersion":"2.10.3"},
+    {"VulnerabilityID":"CVE-2026-27145","PkgName":"stdlib","InstalledVersion":"v1.26.3","FixedVersion":"1.25.11, 1.26.4"},
+    {"VulnerabilityID":"CVE-2026-39822","PkgName":"stdlib","InstalledVersion":"v1.26.3","FixedVersion":"1.25.12, 1.26.5, 1.27.0-rc.2"},
+    {"VulnerabilityID":"CVE-2026-42504","PkgName":"stdlib","InstalledVersion":"v1.26.3","FixedVersion":"1.25.11, 1.26.4"},
+    {"VulnerabilityID":"CVE-2026-25681","PkgName":"golang.org/x/net","InstalledVersion":"v0.49.0","FixedVersion":"0.55.0"},
+    {"VulnerabilityID":"CVE-2026-27136","PkgName":"golang.org/x/net","InstalledVersion":"v0.49.0","FixedVersion":"0.55.0"},
+    {"VulnerabilityID":"CVE-2026-33814","PkgName":"golang.org/x/net","InstalledVersion":"v0.49.0","FixedVersion":"0.53.0"},
+    {"VulnerabilityID":"CVE-2026-39821","PkgName":"golang.org/x/net","InstalledVersion":"v0.49.0","FixedVersion":"0.55.0"},
+    {"VulnerabilityID":"CVE-2026-56852","PkgName":"golang.org/x/text","InstalledVersion":"v0.33.0","FixedVersion":"0.39.0"},
+    {"VulnerabilityID":"GHSA-hrxh-6v49-42gf","PkgName":"google.golang.org/grpc","InstalledVersion":"v1.79.3","FixedVersion":"1.82.1"}
+  ],
+  "expires": "2026-09-11",
+  "upstreamEvidence": "Checked official Grafana release/image digest on 2026-08-12; no patched official Grafana image containing these dependency updates is available.",
+  "reachabilityControls": "Grafana is dashboard-only, isolated on the internal Docker network, with anonymous access disabled; plugin installation, catalog/public-key retrieval, analytics and update checks are disabled.",
+  "review": "Recheck upstream Grafana releases before expiry; remove each waiver immediately when a patched official image is available."
+}

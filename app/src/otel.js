@@ -21,6 +21,14 @@ const {
 const { OTLPLogExporter } = require("@opentelemetry/exporter-logs-otlp-proto");
 const { PeriodicExportingMetricReader } = require("@opentelemetry/sdk-metrics");
 const { BatchLogRecordProcessor } = require("@opentelemetry/sdk-logs");
+const { PinoInstrumentation } = require("@opentelemetry/instrumentation-pino");
+
+// Pino is loaded by the application after this preload. Register its official
+// Logs API bridge explicitly so there is exactly one patch and one OTLP log
+// stream (the auto-instrumentations bundle also contains Pino).
+const pinoInstrumentation = new PinoInstrumentation({
+  disableLogSending: false,
+});
 
 const sdk = new NodeSDK({
   traceExporter: new OTLPTraceExporter(),
@@ -30,12 +38,26 @@ const sdk = new NodeSDK({
       process.env.OTEL_METRIC_EXPORT_INTERVAL || 10000
     ),
   }),
-  logRecordProcessors: [new BatchLogRecordProcessor(new OTLPLogExporter())],
-  instrumentations: [getNodeAutoInstrumentations()],
+  // sdk-logs 0.221 requires an options object. Passing the exporter directly
+  // leaves the processor with an undefined exporter and silently drops logs.
+  logRecordProcessors: [
+    new BatchLogRecordProcessor({ exporter: new OTLPLogExporter() }),
+  ],
+  instrumentations: [
+    getNodeAutoInstrumentations({
+      "@opentelemetry/instrumentation-pino": { enabled: false },
+    }),
+    pinoInstrumentation,
+  ],
 });
 
 sdk.start();
 
-process.on("SIGTERM", () => {
-  sdk.shutdown().finally(() => process.exit(0));
-});
+let shuttingDown = false;
+const shutdown = () => {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  sdk.shutdown().catch(() => {}).finally(() => process.exit(0));
+};
+process.on("SIGTERM", shutdown);
+process.on("SIGINT", shutdown);

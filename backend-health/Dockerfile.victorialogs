@@ -1,0 +1,7 @@
+FROM golang:1.26.0-alpine@sha256:d4c4845f5d60c6a974c6000ce58ae079328d03ab7f721a0734277e69905473e5 AS build
+WORKDIR /src
+COPY health.go .
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags='-s -w' -o /health-probe health.go
+FROM victoriametrics/victoria-logs:v1.52.0@sha256:47b820890d64c4575a2a0a46415dcd8a4fd59a0f1fcd6a377693d7aea639442e
+COPY --from=build /health-probe /health-probe
+HEALTHCHECK --interval=5s --timeout=3s --retries=20 CMD ["/health-probe","-url","http://127.0.0.1:9428/health"]

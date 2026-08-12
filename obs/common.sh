@@ -1,12 +1,15 @@
 #!/usr/bin/env bash
 # Shared config for the obs/* query helpers. Sourced, not run directly.
-# Override any host via env, e.g. VL_URL=http://remote:9428 ./obs/logs.sh ...
+# All reads go through the local query Gateway.
 
 set -euo pipefail
 
-VL_URL="${VL_URL:-http://localhost:9428}"   # VictoriaLogs  (LogQL)
-VM_URL="${VM_URL:-http://localhost:8428}"   # VictoriaMetrics (PromQL)
-VT_URL="${VT_URL:-http://localhost:10428}"  # VictoriaTraces (Jaeger query)
+die() { echo "error: $*" >&2; exit 1; }
+
+GATEWAY_URL="${GATEWAY_URL:-http://127.0.0.1:17777}"
+if [[ -z "${GATEWAY_QUERY_TOKEN:-}" && -n "${GATEWAY_QUERY_TOKEN_FILE:-}" && -r "${GATEWAY_QUERY_TOKEN_FILE}" ]]; then GATEWAY_QUERY_TOKEN="$(<"${GATEWAY_QUERY_TOKEN_FILE}")"; fi
+if [[ -z "${GATEWAY_QUERY_TOKEN:-}" ]]; then die "GATEWAY_QUERY_TOKEN is required"; fi
+gateway_get() { curl -fsS -H "Authorization: Bearer ${GATEWAY_QUERY_TOKEN}" --get "${GATEWAY_URL}${1}" "${@:2}"; }
 
 # Pretty-print JSON if jq exists, otherwise pass through.
 pp() { if command -v jq >/dev/null 2>&1; then jq "${1:-.}"; else cat; fi; }
@@ -31,7 +34,7 @@ log_field_value() {
 
 duration_value() {
   local v="${1:-}"
-  if [[ ! "${v}" =~ ^[0-9]+(ms|s|m|h|d|w|y)$ ]]; then
+  if [[ ! "${v}" =~ ^(5m|15m|1h|6h|24h)$ ]]; then
     die "invalid duration: ${v}"
   fi
   printf '%s' "${v}"
@@ -39,10 +42,8 @@ duration_value() {
 
 limit_value() {
   local v="${1:-}"
-  if [[ ! "${v}" =~ ^[0-9]+$ ]] || (( v < 1 || v > 1000 )); then
+  if [[ ! "${v}" =~ ^[0-9]+$ ]] || (( v < 1 || v > 500 )); then
     die "invalid limit: ${v}"
   fi
   printf '%s' "${v}"
 }
-
-die() { echo "error: $*" >&2; exit 1; }

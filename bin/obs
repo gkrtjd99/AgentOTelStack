@@ -1,0 +1,15 @@
+#!/bin/sh
+set -eu
+SELF=$(CDPATH=; cd -- "$(dirname -- "$0")" && pwd)
+# A launcher copied into a runtime has its dispatcher beside it.  A checkout
+# launcher has the dispatcher one directory above bin/.  Do not resolve
+# unrelated symlinks: installed $bin/obs must remain clone-independent and
+# must select the XDG current runtime only when no local dispatcher exists.
+if [ -f "$SELF/dispatch.sh" ]; then
+  exec "$SELF/dispatch.sh" "$@"
+fi
+if [ -f "$SELF/../libexec/agentotel/dispatch.sh" ]; then
+  exec "$SELF/../libexec/agentotel/dispatch.sh" "$@"
+fi
+DATA=${XDG_DATA_HOME:-${HOME:?}/.local/share}
+exec "$DATA/agentotel/current/libexec/agentotel/dispatch.sh" "$@"
