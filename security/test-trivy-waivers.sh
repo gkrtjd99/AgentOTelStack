@@ -6,12 +6,12 @@ tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 report="$tmp/report.json"
 artifacts="$tmp/artifacts"
-expected_digest='sha256:ab9a06d495291c7ba210426b62e9056dba6046d0945f7e9af041f3ff29b4c7fe'
+expected_digest='sha256:ab5cb380e3ff3172d6c8bd2e7cfd31cce977d2881b260e1f5bc089bf0b759b43'
 cat >"$tmp/waiver.json" <<'JSON'
-{"image":"grafana/grafana@sha256:ab9a06d495291c7ba210426b62e9056dba6046d0945f7e9af041f3ff29b4c7fe","expires":"2026-08-30","owner":"platform-security","upstreamEvidence":"verified upstream pinned image evidence","reachabilityControls":"dashboard is isolated and anonymous access is disabled","waivers":[]}
+{"image":"grafana/grafana@sha256:ab5cb380e3ff3172d6c8bd2e7cfd31cce977d2881b260e1f5bc089bf0b759b43","expires":"2026-08-30","owner":"platform-security","upstreamEvidence":"verified upstream pinned image evidence","reachabilityControls":"dashboard is isolated and anonymous access is disabled","waivers":[]}
 JSON
 cat >"$report" <<'JSON'
-{"ArtifactName":"local-grafana:test","Metadata":{"ImageConfig":{"config":{"Labels":{"org.opencontainers.image.base.name":"grafana/grafana","org.opencontainers.image.base.digest":"sha256:ab9a06d495291c7ba210426b62e9056dba6046d0945f7e9af041f3ff29b4c7fe"}}}},"Results":[]}
+{"ArtifactName":"local-grafana:test","Metadata":{"ImageConfig":{"config":{"Labels":{"org.opencontainers.image.base.name":"grafana/grafana","org.opencontainers.image.base.digest":"sha256:ab5cb380e3ff3172d6c8bd2e7cfd31cce977d2881b260e1f5bc089bf0b759b43"}}}},"Results":[]}
 JSON
 
 WAIVER_FILE="$tmp/waiver.json" WAIVER_AS_OF=2026-08-12 ARTIFACTS_DIR="$artifacts" \
@@ -42,7 +42,7 @@ if WAIVER_FILE="$tmp/waiver.json" WAIVER_AS_OF=2026-08-12 ARTIFACTS_DIR="$artifa
   exit 1
 fi
 
-sed 's#sha256:ab9a06d495291c7ba210426b62e9056dba6046d0945f7e9af041f3ff29b4c7fe#sha256:0000000000000000000000000000000000000000000000000000000000000000#' "$report" >"$tmp/wrong-base.json"
+sed "s#$expected_digest#sha256:0000000000000000000000000000000000000000000000000000000000000000#" "$report" >"$tmp/wrong-base.json"
 if WAIVER_FILE="$tmp/waiver.json" WAIVER_AS_OF=2026-08-12 ARTIFACTS_DIR="$artifacts" \
   "$root/scripts/verify-trivy-waivers.sh" local-grafana:test "$tmp/wrong-base.json" >/dev/null 2>&1; then
   echo 'trivy-waiver-test: mismatched base identity was accepted' >&2
