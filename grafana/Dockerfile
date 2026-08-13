@@ -3,7 +3,7 @@
 # no network/plugin installation dependency.
 # Pin the multi-arch release manifest; keeping the digest here makes rebuilds
 # reproducible and prevents an unreviewed tag update.
-FROM grafana/grafana@sha256:ab9a06d495291c7ba210426b62e9056dba6046d0945f7e9af041f3ff29b4c7fe AS plugin
+FROM grafana/grafana@sha256:ab5cb380e3ff3172d6c8bd2e7cfd31cce977d2881b260e1f5bc089bf0b759b43 AS plugin
 
 USER root
 
@@ -23,14 +23,14 @@ RUN printf '%s  %s\n' '6b6d7b27354ad972946318aac2a54f04363375e7cd5d1cad9d3bb74d0
     && rm -f /tmp/victorialogs-datasource.tar.gz /tmp/victorialogs-datasource.sha256
 USER 472
 
-FROM grafana/grafana@sha256:ab9a06d495291c7ba210426b62e9056dba6046d0945f7e9af041f3ff29b4c7fe
+FROM grafana/grafana@sha256:ab5cb380e3ff3172d6c8bd2e7cfd31cce977d2881b260e1f5bc089bf0b759b43
 
 COPY --from=plugin --chown=472:0 /opt/grafana-plugins /opt/grafana-plugins
 # Keep the exact upstream identity in the image metadata.  The Trivy waiver
 # gate checks this label on the locally-built image; the local Compose name is
 # intentionally not treated as Grafana's upstream identity.
 LABEL org.opencontainers.image.base.name="grafana/grafana" \
-      org.opencontainers.image.base.digest="sha256:ab9a06d495291c7ba210426b62e9056dba6046d0945f7e9af041f3ff29b4c7fe"
+      org.opencontainers.image.base.digest="sha256:ab5cb380e3ff3172d6c8bd2e7cfd31cce977d2881b260e1f5bc089bf0b759b43"
 # Grafana 12 enables external core-plugin management by default. Keep this
 # image self-contained: only the verified plugin above may be loaded, and no
 # startup catalog/preinstall/update fetch is needed for this stack.
