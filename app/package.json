@@ -3,6 +3,9 @@
   "version": "2.0.1",
   "private": true,
   "type": "commonjs",
+  "engines": {
+    "node": ">=20.6"
+  },
   "description": "Swappable sample app under observation. Emits OTLP logs/metrics/traces.",
   "main": "src/index.js",
   "scripts": {
@@ -19,9 +22,9 @@
     "@opentelemetry/sdk-logs": "0.221.0",
     "@opentelemetry/sdk-metrics": "2.10.0",
     "@opentelemetry/sdk-node": "0.221.0",
-    "express": "4.22.2",
+    "express": "5.2.1",
     "pino": "10.3.1",
-    "pino-http": "10.5.0"
+    "pino-http": "11.0.0"
   },
   "overrides": {
     "brace-expansion": "5.0.9",
