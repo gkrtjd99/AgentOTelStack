@@ -1,79 +1,90 @@
 # Local observability stack for AI coding agents (Claude Code / Codex / OpenCode).
 #
-# Flow:  app --OTLP--> otel-collector --fanout--> VictoriaLogs / VictoriaMetrics / VictoriaTraces
+# Flow:  app --authenticated OTLP--> Gateway --OTLP--> collector --fanout--> Victoria stores
 # Agents read telemetry back via the query APIs using the helper scripts in ./obs.
 # The OpenTelemetry Collector fans out all three signals (logs/metrics/traces) natively.
 
-name: dev-observability
+name: ${COMPOSE_PROJECT_NAME:-dev-observability}
 
 networks:
   default:
-    name: dev-observability
+    name: ${COMPOSE_PROJECT_NAME:-dev-observability}-default
+  edge:
+    name: ${COMPOSE_PROJECT_NAME:-dev-observability}-edge
+  backend:
+    name: ${COMPOSE_PROJECT_NAME:-dev-observability}-backend
+    internal: true
 
 services:
   # ---- Storage: logs -------------------------------------------------------
   victorialogs:
-    image: victoriametrics/victoria-logs@sha256:ae9bea8d8a3b0fc47c7f0058bcca410e79c84b4a0acd12d4dac71b9302526590
-    container_name: victorialogs
+    build: {context: ./backend-health, dockerfile: Dockerfile.victorialogs}
+    # Keep locally built images distinct for every installed runtime.  A
+    # rollback must select the image built from that runtime's assets instead
+    # of silently reusing a newer image under the same tag.
+    image: dev-observability/victorialogs:v1.52.0-health-${AGENTOTEL_RUNTIME_VERSION:-dev}
     command:
       - -storageDataPath=/vlogs
       - -httpListenAddr=:9428
-    ports:
-      - "127.0.0.1:9428:9428" # LogQL query API + OTLP logs ingestion
+      - -retentionPeriod=7d
+      - -retention.maxDiskSpaceUsageBytes=2GiB
+      - -storage.minFreeDiskSpaceBytes=200MiB
+    labels: ["com.agentotel.stack=dev-observability"]
+    logging: {driver: json-file, options: {max-size: "10m", max-file: "3"}}
+    networks: [backend]
     volumes:
       - victorialogs-data:/vlogs
-    healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:9428/health"]
-      interval: 5s
-      timeout: 3s
-      retries: 20
 
   # ---- Storage: metrics ----------------------------------------------------
   victoriametrics:
-    image: victoriametrics/victoria-metrics@sha256:dc030542eb0cd262287c9ec32e5867f8dcccc0efd5906c10f7fc8176c53d34d7
-    container_name: victoriametrics
+    build: {context: ./backend-health, dockerfile: Dockerfile.victoriametrics}
+    image: dev-observability/victoriametrics:v1.149.0-health-${AGENTOTEL_RUNTIME_VERSION:-dev}
     command:
-      - -storageDataPath=/vmdata
       - -httpListenAddr=:8428
       - -opentelemetry.usePrometheusNaming=true # nicer metric names from OTLP
-    ports:
-      - "127.0.0.1:8428:8428" # PromQL query API + OTLP metrics ingestion
+      - -retentionPeriod=30d
+      - -denyQueriesOutsideRetention
+      - -storage.minFreeDiskSpaceBytes=200MiB
+      - -storageDataPath=/vmdata
+    labels: ["com.agentotel.stack=dev-observability"]
+    logging: {driver: json-file, options: {max-size: "10m", max-file: "3"}}
+    networks: [backend]
     volumes:
       - victoriametrics-data:/vmdata
-    healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8428/health"]
-      interval: 5s
-      timeout: 3s
-      retries: 20
 
   # ---- Storage: traces -----------------------------------------------------
   victoriatraces:
-    image: victoriametrics/victoria-traces@sha256:d42615c458b5698737c33411359012a1136c3f579e4c2516687db2ea7ed08362
-    container_name: victoriatraces
+    build: {context: ./backend-health, dockerfile: Dockerfile.victoriatraces}
+    image: dev-observability/victoriatraces:v0.10.0-health-${AGENTOTEL_RUNTIME_VERSION:-dev}
     command:
       - -storageDataPath=/vtraces
       - -httpListenAddr=:10428
-    ports:
-      - "127.0.0.1:10428:10428" # Jaeger query API + OTLP traces ingestion
+      - -retentionPeriod=7d
+      - -retention.maxDiskSpaceUsageBytes=2GiB
+      - -storage.minFreeDiskSpaceBytes=200MiB
+    labels: ["com.agentotel.stack=dev-observability"]
+    logging: {driver: json-file, options: {max-size: "10m", max-file: "3"}}
+    networks: [backend]
     volumes:
       - victoriatraces-data:/vtraces
-    healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:10428/health"]
-      interval: 5s
-      timeout: 3s
-      retries: 20
 
   # ---- Fan-out collector ---------------------------------------------------
   otel-collector:
-    image: otel/opentelemetry-collector-contrib@sha256:93aad750175cbf1a973ae1c5886c3371f4d800f61be25cdd26870b8441ffe9fa
-    container_name: otel-collector
+    build: {context: ./backend-health, dockerfile: Dockerfile.collector}
+    image: dev-observability/otel-collector:v0.158.0-health-${AGENTOTEL_RUNTIME_VERSION:-dev}
     command: ["--config=/etc/otelcol/config.yaml"]
     volumes:
       - ./otel-collector/config.yaml:/etc/otelcol/config.yaml:ro
-    ports:
-      - "127.0.0.1:4317:4317" # OTLP gRPC
-      - "127.0.0.1:4318:4318" # OTLP HTTP
+      - otelcol-queue:/var/lib/otelcol/queue
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks: [backend]
     depends_on:
+      otelcol-queue-init:
+        condition: service_completed_successfully
       victorialogs:
         condition: service_healthy
       victoriametrics:
@@ -81,44 +92,97 @@ services:
       victoriatraces:
         condition: service_healthy
 
+  # Named volumes are created root-owned by Docker, while the pinned collector
+  # runs as UID 10001.  This short-lived init performs the narrow ownership
+  # transition once; the collector itself never runs privileged or writable as
+  # root, and the queue is not world-writable.
+  otelcol-queue-init:
+    image: busybox@sha256:73aaf090f3d85aa34ee199857f03fa3a95c8ede2ffd4cc2cdb5b94e566b11662
+    user: "0:0"
+    command: ["sh", "-ec", "mkdir -p /var/lib/otelcol/queue && chown -R 10001:10001 /var/lib/otelcol/queue"]
+    volumes:
+      - otelcol-queue:/var/lib/otelcol/queue
+    restart: "no"
+    logging: {driver: json-file, options: {max-size: "10m", max-file: "3"}}
+
+  gateway:
+    build:
+      context: ./gateway
+    image: dev-observability/gateway:${AGENTOTEL_RUNTIME_VERSION:-dev}
+    environment:
+      GATEWAY_VERSION: ${AGENTOTEL_RUNTIME_VERSION:-dev}
+      GATEWAY_INGEST_TOKEN: ${GATEWAY_INGEST_TOKEN:?set GATEWAY_INGEST_TOKEN}
+      GATEWAY_COLLECTOR_URL: http://otel-collector:4318
+      GATEWAY_QUERY_TOKEN: ${GATEWAY_QUERY_TOKEN:?set GATEWAY_QUERY_TOKEN}
+      GATEWAY_LOGS_URL: http://victorialogs:9428
+      GATEWAY_METRICS_URL: http://victoriametrics:8428
+      GATEWAY_TRACES_URL: http://victoriatraces:10428
+    ports:
+      - "127.0.0.1:${GATEWAY_INGEST_HOST_PORT:-4318}:4318"
+      - "127.0.0.1:${GATEWAY_QUERY_HOST_PORT:-17777}:17777"
+    networks: [edge, backend]
+    depends_on:
+      otel-collector:
+        condition: service_started
+    logging: {driver: json-file, options: {max-size: "10m", max-file: "3"}}
+
   # ---- Sample app under observation (swappable: bring your own) -------------
   # Behind the `demo` profile so the default `docker compose up` starts ONLY the
   # shared infra (collector + stores). Your own apps run on the host and point at
   # http://localhost:4318. To run the bundled demo: `docker compose --profile demo up`.
   app:
     build: ./app
-    container_name: app
+    image: dev-observability/app:${AGENTOTEL_RUNTIME_VERSION:-dev}
     profiles: ["demo"]
     environment:
       OTEL_SERVICE_NAME: sample-app
-      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://gateway:4318
       OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
+      # The OTLP JS exporters parse this standard key/value header format and
+      # URL-decode the value, yielding Authorization: Bearer <ingest-token>.
+      # Keep the value sourced from the same secret as the Gateway; never log it.
+      OTEL_EXPORTER_OTLP_HEADERS: Authorization=Bearer%20${GATEWAY_INGEST_TOKEN:?set GATEWAY_INGEST_TOKEN}
       OTEL_METRIC_EXPORT_INTERVAL: "10000" # 10s for demo responsiveness (default 60s)
       OTEL_NODE_RESOURCE_DETECTORS: env,host,os
-      OTEL_RESOURCE_ATTRIBUTES: deployment.environment=dev,service.namespace=demo,smoke.run_id=${SMOKE_RUN_ID:-manual}
+      # compose.sh supplies a workspace-scoped UUIDv4 whenever this profile is
+      # selected.  Keep interpolation empty for infra-only operations, which
+      # must remain usable outside a Git checkout.
+      OTEL_RESOURCE_ATTRIBUTES: deployment.environment=dev,service.namespace=demo,agentotel.project.id=${AGENTOTEL_PROJECT_ID:-},smoke.run_id=${SMOKE_RUN_ID:-manual}
       PORT: "3000"
     ports:
-      - "127.0.0.1:3000:3000"
+      - "127.0.0.1:${APP_HOST_PORT:-3000}:3000"
+    networks: [edge]
     depends_on:
-      otel-collector:
+      gateway:
         condition: service_started
+    logging: {driver: json-file, options: {max-size: "10m", max-file: "3"}}
 
   # ---- Optional human dashboard -------------------------------------------
   # Dashboard is opt-in: `docker compose --profile dashboard up -d`.
   # The script-first agent interface remains obs/*.sh.
   grafana:
-    image: grafana/grafana@sha256:e67fa772c14a0c728df61d7ac1b46d0da24e557efa729dbe1c404bf4403d6f35
-    container_name: grafana
+    build:
+      context: ./grafana
+      dockerfile: Dockerfile
+    image: dev-observability/grafana:${AGENTOTEL_RUNTIME_VERSION:-dev}
     profiles: ["dashboard"]
     environment:
-      GF_AUTH_ANONYMOUS_ENABLED: "true"
-      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
-      GF_PLUGINS_PREINSTALL_SYNC: victoriametrics-logs-datasource
-      GF_SECURITY_ADMIN_PASSWORD: admin
-      GF_SECURITY_ADMIN_USER: admin
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      # Plugins live outside /var/lib/grafana because that directory is backed
+      # by grafana-data and must remain safe to migrate/replace.
+      GF_PATHS_PLUGINS: /opt/grafana-plugins
+      GF_PLUGINS_PREINSTALL_DISABLED: "true"
+      GF_PLUGINS_PLUGIN_ADMIN_ENABLED: "false"
+      GF_PLUGINS_PUBLIC_KEY_RETRIEVAL_DISABLED: "true"
+      GF_PLUGINS_ALLOW_LOADING_UNSIGNED_PLUGINS: victoriametrics-logs-datasource
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+      GF_ANALYTICS_CHECK_FOR_PLUGIN_UPDATES: "false"
+      GF_SECURITY_ADMIN_PASSWORD: ${GF_SECURITY_ADMIN_PASSWORD:?set GF_SECURITY_ADMIN_PASSWORD}
+      GF_SECURITY_ADMIN_USER: ${GF_SECURITY_ADMIN_USER:-admin}
       GF_USERS_ALLOW_SIGN_UP: "false"
     ports:
-      - "127.0.0.1:3001:3000"
+      - "127.0.0.1:${GRAFANA_HOST_PORT:-3001}:3000"
+    networks: [backend]
     volumes:
       - ./grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
       - ./grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
@@ -131,9 +195,21 @@ services:
         condition: service_healthy
       victoriatraces:
         condition: service_healthy
+    logging: {driver: json-file, options: {max-size: "10m", max-file: "3"}}
 
 volumes:
+  otelcol-queue:
+    name: "${COMPOSE_PROJECT_NAME:-dev-observability}_otelcol-queue"
+    external: true
   victorialogs-data:
+    name: "${COMPOSE_PROJECT_NAME:-dev-observability}_victorialogs-data"
+    external: true
   victoriametrics-data:
+    name: "${COMPOSE_PROJECT_NAME:-dev-observability}_victoriametrics-data"
+    external: true
   victoriatraces-data:
+    name: "${COMPOSE_PROJECT_NAME:-dev-observability}_victoriatraces-data"
+    external: true
   grafana-data:
+    name: "${COMPOSE_PROJECT_NAME:-dev-observability}_grafana-data"
+    external: true

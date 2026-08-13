@@ -3,9 +3,9 @@
 The current dashboard surface is intentionally script-first:
 
 - `make dashboard SERVICE=sample-app`
-- `./obs/overview.sh <service> [lookback]`
+- `./bin/obs credentials run -- ./obs/overview.sh <service> [lookback]`
 - optional Grafana dashboard through `make grafana`
-- built-in Victoria UIs documented in [`DASHBOARD.md`](./DASHBOARD.md)
+- the optional Grafana UI and authenticated Gateway helpers documented in [`DASHBOARD.md`](./DASHBOARD.md)
 
 This keeps the default stack small while still giving humans a quick overview.
 
@@ -36,8 +36,8 @@ Validation commands:
 
 ```bash
 make dashboard SERVICE=sample-app MODE=compact LOOKBACK=15m
-./obs/overview.sh --json --since 15m sample-app
-./obs/overview.sh --compact my-app 15m
+./bin/obs credentials run -- ./obs/overview.sh --json --since 15m sample-app
+./bin/obs credentials run -- ./obs/overview.sh --compact my-app 15m
 ```
 
 ## Phase 2: Optional Grafana Profile
@@ -47,7 +47,7 @@ Status: implemented.
 Added an optional `dashboard` compose profile:
 
 ```bash
-docker compose --profile dashboard up -d
+./bin/obs compose --profile dashboard up -d
 make grafana
 ```
 
@@ -70,13 +70,12 @@ Initial panels:
 Completion criteria:
 
 - Dashboard starts only when profile is requested.
-- Core `make up` remains collector + Victoria stores only.
+- Core `make up` remains Gateway + collector + Victoria stores only.
 - Dashboard JSON is versioned and reproducible.
 
 Validation commands:
 
 ```bash
-docker compose --profile demo --profile dashboard config
 make grafana
 curl -fsS http://localhost:3001/api/health
 curl -fsS http://localhost:3001/api/datasources

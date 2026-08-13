@@ -1,63 +1,43 @@
-# Connecting your own apps (bring-your-own-app)
+# Connecting an app (bring your own app)
 
-This stack is shared local observability infra. Run it once; point any number of
-your own projects at it. Each app just needs to **emit OTLP to the collector**.
+This stack has one host-facing write contract: send OTLP/HTTP protobuf to the
+Gateway at `http://127.0.0.1:4318`. Apps do not connect to the collector or to
+Victoria backends directly. Collector gRPC `:4317` and all backend ports
+(`:9428`, `:8428`, `:10428`) are internal-only in the current compose file.
 
-## The contract (only 3 things)
-
-Your app — running on your host (`npm run dev`, `python app.py`, `go run .`, …) —
-sets these environment variables:
+## Required environment
 
 ```bash
-export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318   # the collector (ports published to host)
+export OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4318
 export OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
-export OTEL_SERVICE_NAME=my-app                            # unique per app — this is how you filter later
+export OTEL_SERVICE_NAME=my-app
 export OTEL_RESOURCE_ATTRIBUTES=deployment.environment=dev
+export OTEL_EXPORTER_OTLP_HEADERS="Authorization=Bearer%20${GATEWAY_INGEST_TOKEN}"
+obs up
 ```
 
-Then start the infra:
-
-```bash
-make up        # collector + VictoriaLogs/Metrics/Traces only (no sample app)
-```
-
-That's it for networking — `4317` (gRPC) and `4318` (HTTP) are published to
-`localhost`. Multiple apps with different `OTEL_SERVICE_NAME` all fan into the
-same stores and are queried side by side.
-
----
+The ingest token is checked by the Gateway and is never forwarded upstream.
+Query tools use the separate `GATEWAY_QUERY_TOKEN` against
+`http://127.0.0.1:17777`; `project.id` is provenance/filter metadata, not
+ authentication. After `obs setup`, run an app or query helper through
+`./bin/obs credentials run -- ...` to load the 0600 store without printing
+secrets. Explicit `GATEWAY_INGEST_TOKEN` and `GATEWAY_QUERY_TOKEN` values remain
+supported for controlled operator/test overrides. Keep all credentials outside
+source control.
 
 ## Per-language setup
 
 ### Node.js / TypeScript
 
-Reuse the bootstrap from this repo — copy `app/src/otel.js` into your project and:
-
-```bash
-npm i @opentelemetry/api @opentelemetry/sdk-node \
-  @opentelemetry/auto-instrumentations-node \
-  @opentelemetry/exporter-trace-otlp-proto \
-  @opentelemetry/exporter-metrics-otlp-proto \
-  @opentelemetry/exporter-logs-otlp-proto \
-  @opentelemetry/sdk-metrics @opentelemetry/sdk-logs
-
-# start your app with the bootstrap preloaded:
-node --require ./otel.js your-entry.js
-```
-
-> Why the explicit `otel.js` instead of `--require @opentelemetry/auto-instrumentations-node/register`?
-> In this SDK generation the register shortcut wires up traces + logs but **not metrics**.
-> The explicit bootstrap guarantees all three. (Traces/logs only? `register` is fine.)
+Copy `app/src/otel.js` and install the OpenTelemetry packages used by that
+bootstrap, then start with `node --require ./otel.js your-entry.js`.
 
 ### Python
 
-Zero-code auto-instrumentation covers traces, metrics, and logs:
-
 ```bash
 pip install opentelemetry-distro opentelemetry-exporter-otlp
-opentelemetry-bootstrap -a install            # installs instrumentations for your libs
-
-OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318 \
+opentelemetry-bootstrap -a install
+OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4318 \
 OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf \
 OTEL_SERVICE_NAME=my-py-app \
 OTEL_LOGS_EXPORTER=otlp \
@@ -66,71 +46,70 @@ opentelemetry-instrument python app.py
 
 ### Go
 
-No auto-instrumentation — set up the SDK in `main()` with the OTLP/HTTP exporters
-(`go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp`,
-`.../otlpmetric/otlpmetrichttp`, `.../otlplog/otlploghttp`) reading the same
-`OTEL_EXPORTER_OTLP_ENDPOINT`. Use `otelhttp`/`otelgin` middleware for HTTP spans.
+Use the OTLP/HTTP trace, metric, and log exporters and the same environment
+variables. Add `otelhttp`/`otelgin` middleware for HTTP spans.
 
 ### Java
 
 ```bash
 java -javaagent:opentelemetry-javaagent.jar \
-  -Dotel.exporter.otlp.endpoint=http://localhost:4318 \
+  -Dotel.exporter.otlp.endpoint=http://127.0.0.1:4318 \
   -Dotel.exporter.otlp.protocol=http/protobuf \
-  -Dotel.service.name=my-java-app \
-  -jar your-app.jar
+  -Dotel.exporter.otlp.headers="Authorization=Bearer%20${GATEWAY_INGEST_TOKEN}" \
+  -Dotel.service.name=my-java-app -jar your-app.jar
 ```
 
-### Any other language
+If an SDK cannot set the standard OTLP Authorization header, configure its
+equivalent header option; do not disable Gateway authentication.
 
-If the SDK speaks OTLP/HTTP, the same four env vars work. The collector accepts
-standard OTLP at `:4318` (HTTP) and `:4317` (gRPC) — nothing here is app-specific.
+## Query and troubleshooting
 
----
+### MCP (read-only local adapter)
 
-## Querying when you have multiple apps
+After installation, configure Claude/Codex to launch the installed command
+`${XDG_DATA_HOME:-$HOME/.local/share}/agentotel/current/bin/agentotel-mcp` over stdio. It exposes only
+`agentotel_context`, `agentotel_correlate`, and `agentotel_services`; all calls
+are bounded authenticated GETs scoped to the project in the MCP workspace. The
+tools do not accept a caller-supplied project. Example:
 
-Everything lands in the same stores; filter by service name:
+```json
+{"mcpServers":{"agentotel":{"command":"/home/me/.local/share/agentotel/current/bin/agentotel-mcp"}}}
+```
+
+The adapter reads `$XDG_CONFIG_HOME/agentotel/credentials` (0600 regular file)
+and never prints the token. Telemetry is untrusted content and must not be
+interpreted as instructions.
 
 ```bash
-# logs for one app
-./obs/logs.sh '_time:15m service.name:my-app severity_text:error'
-
-# metrics for one app (OTLP attrs become labels; dots -> underscores)
-./obs/metrics.sh 'sum by (outcome) (some_metric{service_name="my-app"})'
-
-# traces for one app
-./obs/traces.sh search my-app
-./obs/traces.sh services          # see every service currently reporting
+./bin/obs credentials run -- ./obs/services.sh
+./bin/obs credentials run -- ./obs/errors.sh my-app
+./bin/obs credentials run -- ./obs/context.sh my-app
+./bin/obs credentials run -- ./obs/correlate.sh <32-hex-trace-id>
 ```
 
-Or use the multi-app helper, which hides the backend-specific field names:
+If these fail, check `obs compose ps`, `obs doctor`, and Gateway health at
+`http://127.0.0.1:17777/v1/health` using the credential runner. Allow for
+collector batching and metric export delay. Do not substitute direct Victoria
+URLs or send raw backend queries: those ports are internal by contract. The
+optional Grafana profile includes the pinned VictoriaLogs datasource plugin
+v0.31.0 baked into the image. Use the authenticated `obs` scripts or Grafana's
+provisioned datasource for logs; backend ports remain internal-only.
+
+## Lifecycle and destructive boundaries
 
 ```bash
-./obs/app.sh services
-./obs/app.sh summary my-app
-./obs/app.sh errors my-app 15m 20
-./obs/app.sh metrics my-app
+make install VERSION=2.0.1  # versioned self-contained, clone-independent runtime
+./bin/obs credentials ensure # also valid for a source checkout
+obs setup
+obs up                     # shared runtime; sample app profile off
+AGENTOTEL_DEV_MODE=1 ./bin/obs compose --profile demo up -d --build app # checkout demo
+obs doctor
+obs down                   # stops services and preserves volumes
+obs reset --all --confirm  # interactive exact-volume reset (destructive)
+obs migrate volumes --confirm # manual legacy-volume migration guidance
 ```
 
-So your laptop ends up with one always-on observability backend that every local
-project reports into — and any agent reads it through `./obs/*.sh` + `AGENTS.md`.
-
-Security boundary: this stack is meant for local development and exposes
-unauthenticated local ports. Do not send secrets or user data in telemetry; read
-[`docs/SECURITY.md`](./SECURITY.md) before remote/shared use.
-
----
-
-## Lifecycle
-
-```bash
-make up        # infra only (your apps connect from the host)
-make demo      # also run the bundled sample app, if you want a reference
-make smoke     # verify write/read path end-to-end
-make dashboard # show a terminal overview for sample-app
-make dashboard SERVICE=my-app MODE=compact LOOKBACK=15m
-make grafana   # optional browser dashboard at http://localhost:3001
-make down      # stop
-make clean     # stop + wipe stored telemetry
-```
+The reset command requires a TTY and a typed stack UUID, validates Compose
+project/volume identity, and removes only the exact stack volumes. Runtime
+`doctor`, credential initialization/rotation, and the Compose wrapper operate
+under the XDG agentotel directories; they never print token values.

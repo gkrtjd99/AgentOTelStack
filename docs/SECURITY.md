@@ -1,58 +1,48 @@
-# Security Notes
+# Security notes
 
-This repository is designed as a local development observability stack. The
-default and optional profiles publish unauthenticated HTTP ports on
-`localhost`:
+This is a same-user local development stack. The Gateway publishes only
+localhost `:4318` (ingest) and `:17777` (query); Victoria backends remain on the
+backend Docker network. Ingest and query use separate bearer tokens from
+`GATEWAY_INGEST_TOKEN`/`GATEWAY_QUERY_TOKEN` or token files. `project.id` is
+provenance, not an auth boundary.
 
-| Port | Service | Risk if exposed |
-|---|---|---|
-| 4317 / 4318 | OTLP ingest | Any reachable client can send telemetry |
-| 8428 | VictoriaMetrics | Metrics can be queried and modified via API |
-| 9428 | VictoriaLogs | Logs can be queried |
-| 10428 | VictoriaTraces | Traces can be queried |
-| 3000 | sample-app demo | Demo app endpoint, only with `make demo` |
-| 3001 | Grafana | Optional dashboard profile; anonymous viewer enabled |
+The optional `bin/agentotel-mcp` adapter is read-only: it exposes three fixed
+tools over stdio JSON-RPC and performs only bounded authenticated GETs to the
+loopback Gateway, scoped to the project resolved from its workspace. It cannot
+accept an arbitrary project input, write telemetry, execute commands, select
+arbitrary URLs, or rotate credentials. Returned telemetry remains untrusted
+content.
 
-## Recommended Local Use
+Do not put secrets, credentials, personal data, or unbounded request text in
+logs, span attributes, exception messages, or metric labels. The Gateway strips
+control characters and projects responses, but it is not a secrecy or redaction
+policy engine; enforce redaction before emission and bound cardinality.
 
-- Run on a trusted developer machine.
-- Keep Docker port bindings on localhost or a private interface.
-- Keep Grafana behind the optional `dashboard` profile unless a browser
-  dashboard is needed.
-- Do not send secrets, tokens, credentials, or personal data in logs, span
-  attributes, metric labels, or exception messages.
-- Use `make clean` when you need to wipe local stored telemetry.
-- Treat Docker volumes as local data stores. Stopping the stack with
-  `make down` preserves telemetry.
+Because this is a same-user local stack, an authorized ingest client can still
+exhaust or churn retention by sending many distinct resource values. The
+collector bounds the canonical resource/metric label set, but it cannot stop an
+authorized client from generating high-cardinality values within those fields;
+use an ingest proxy or stricter tenant policy when that threat matters.
 
-## Remote or Shared Use
+A same-user process able to read local credentials or Docker can read/alter the
+stack. For remote use add a TLS/authenticated proxy, restrict OTLP senders,
+define retention/redaction, and do not expose backend APIs directly. Grafana is
+optional and has no logs plugin; script/API access is canonical.
 
-If you deliberately expose this stack beyond the local machine, put it behind a
-proper boundary first:
+`make down` and `make clean` preserve telemetry volumes. The destructive cleanup boundary is the
+interactive, UUID/project/volume-identity guarded `make reset`;
+review its exact target before proceeding. Rotate credentials with
+`libexec/agentotel/credentials.sh rotate`; `doctor` and uninstall are limited
+to agentotel runtime paths.
 
-- bind published ports to a private interface or VPN-only address
-- terminate TLS at a reverse proxy
-- require authentication at the proxy
-- restrict inbound OTLP ingestion to trusted apps
-- define retention and redaction policies before collecting real user data
+## Grafana vulnerability waivers
 
-The compose file intentionally does not include production auth, TLS, or
-multi-tenant controls. Add those outside this repo if the stack leaves a local
-developer environment.
-
-## Image Pinning
-
-Runtime images are pinned by digest in `docker-compose.yml`, and the sample app
-base image is pinned by digest in `app/Dockerfile`. The sample app dependencies
-are locked with `app/package-lock.json` and installed with `npm ci`.
-
-Refresh image pins and dependency locks intentionally, then run:
-
-```bash
-cd app && npm audit --omit=dev --audit-level=high
-docker compose --profile demo --profile dashboard config
-make smoke
-```
-
-That keeps dependency updates visible and testable instead of silently following
-moving `latest` tags.
+CI always runs the pinned Trivy 0.73.0 image. App and Gateway images have a
+zero HIGH/CRITICAL-finding policy. Grafana has only the narrow, time-bounded
+waivers in [`security/grafana-trivy-waivers.json`](../security/grafana-trivy-waivers.json):
+each entry is an exact CVE/package/installed-version/fixed-version match for
+the pinned upstream image digest, and expires within 30 days. CRITICALs,
+expired entries, changed packages or image digests, missing upstream/fixed
+version/reachability evidence, and any new HIGH fail CI. The complete Trivy
+JSON and a residual-finding summary are uploaded as CI artifacts; waivers are
+not a blanket `.trivyignore` and do not use `ignore-unfixed`.

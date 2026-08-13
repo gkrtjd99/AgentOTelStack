@@ -1,24 +1,32 @@
 {
   "name": "sample-app",
-  "version": "1.0.0",
+  "version": "2.0.1",
   "private": true,
   "type": "commonjs",
   "description": "Swappable sample app under observation. Emits OTLP logs/metrics/traces.",
   "main": "src/index.js",
   "scripts": {
-    "start": "node --require ./src/otel.js src/index.js"
+    "start": "node --require ./src/otel.js src/index.js",
+    "test": "node --test test/*.test.js"
   },
   "dependencies": {
     "@opentelemetry/api": "1.9.1",
-    "@opentelemetry/auto-instrumentations-node": "0.77.0",
-    "@opentelemetry/exporter-logs-otlp-proto": "0.219.0",
-    "@opentelemetry/exporter-metrics-otlp-proto": "0.219.0",
-    "@opentelemetry/exporter-trace-otlp-proto": "0.219.0",
-    "@opentelemetry/sdk-logs": "0.219.0",
-    "@opentelemetry/sdk-metrics": "2.8.0",
-    "@opentelemetry/sdk-node": "0.219.0",
+    "@opentelemetry/auto-instrumentations-node": "0.79.0",
+    "@opentelemetry/exporter-logs-otlp-proto": "0.221.0",
+    "@opentelemetry/exporter-metrics-otlp-proto": "0.221.0",
+    "@opentelemetry/exporter-trace-otlp-proto": "0.221.0",
+    "@opentelemetry/instrumentation-pino": "0.67.0",
+    "@opentelemetry/sdk-logs": "0.221.0",
+    "@opentelemetry/sdk-metrics": "2.9.0",
+    "@opentelemetry/sdk-node": "0.221.0",
     "express": "4.22.2",
     "pino": "9.14.0",
     "pino-http": "10.5.0"
+  },
+  "overrides": {
+    "brace-expansion": "5.0.9",
+    "ip-address": "10.3.1",
+    "tar": "7.5.19",
+    "undici": "6.27.0"
   }
 }

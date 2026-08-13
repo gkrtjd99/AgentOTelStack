@@ -1,0 +1,5 @@
+services:
+  missing:
+    build:
+      context: .
+      dockerfile: DoesNotExist

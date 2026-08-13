@@ -1,0 +1,15 @@
+#!/bin/sh
+set -eu
+SELF=$(CDPATH=; cd -- "$(dirname -- "$0")" && pwd)
+# Operational commands always resolve through the installed current runtime.
+# Repository development is explicit so a checkout cannot silently override a
+# rolled-back or otherwise selected installed runtime.
+if [ "${AGENTOTEL_DEV_MODE:-0}" = 1 ]; then
+  if [ -f "$SELF/dispatch.sh" ]; then exec "$SELF/dispatch.sh" "$@"; fi
+  if [ -f "$SELF/../libexec/agentotel/dispatch.sh" ]; then exec "$SELF/../libexec/agentotel/dispatch.sh" "$@"; fi
+  echo 'agentotel: development dispatcher unavailable' >&2; exit 69
+fi
+DATA=${XDG_DATA_HOME:-${HOME:?}/.local/share}
+DISPATCH="$DATA/agentotel/current/libexec/agentotel/dispatch.sh"
+[ -x "$DISPATCH" ] || { echo 'agentotel: installed current runtime unavailable; use AGENTOTEL_DEV_MODE=1 for checkout development' >&2; exit 69; }
+exec "$DISPATCH" "$@"

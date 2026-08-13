@@ -17,7 +17,7 @@ total="${1:-200}"
 base="${2:-http://localhost:3000}"
 
 echo "→ sending ${total} requests to ${base}"
-for i in $(seq 1 "${total}"); do
+while [ "$total" -gt 0 ]; do
   r=$((RANDOM % 10))
   if   [[ $r -lt 5 ]]; then path="/api/orders/$((RANDOM % 1000))"
   elif [[ $r -lt 9 ]]; then path="/api/checkout"
@@ -26,5 +26,6 @@ for i in $(seq 1 "${total}"); do
   curl -s -o /dev/null -w "%{http_code} ${path}\n" "${base}${path}" || true
   # light pacing so spans spread over time
   sleep 0.05
+  total=$((total - 1))
 done
 echo "→ done. Query it: ./obs/metrics.sh 'sum by (outcome) (orders_processed_total)'"
