@@ -2,7 +2,7 @@
 set -euo pipefail
 
 repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-dashboard="$repo_dir/dashboards/local-observability.json"
+dashboard="$repo_dir/src/dashboards/local-observability.json"
 
 query="$(python3 - "$dashboard" <<'PY'
 import json, sys

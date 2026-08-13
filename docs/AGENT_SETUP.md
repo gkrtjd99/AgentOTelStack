@@ -23,6 +23,12 @@ Compose targets load those values in-process; secrets are not printed or
 written to a repository `.env` file. Existing `GATEWAY_*`/`GF_*` environment
 values remain supported as explicit operator overrides.
 
+Project metadata is generated locally in `.agentotel/` and is ignored by Git.
+The local `.agentotel/project.toml` supplies the checkout's telemetry identity;
+it is not a shared source artifact. Before upgrading an existing checkout,
+copy that file somewhere safe if you need to preserve the same identity, then
+restore it into the new checkout's `.agentotel/` directory.
+
 `obs setup` creates and labels the exact persistent volumes. `obs up` starts
 the shared six-service runtime: Gateway, collector, queue initializer, and
 the three Victoria backends (the sample app is off). For a checkout demo, run

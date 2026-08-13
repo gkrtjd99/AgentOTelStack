@@ -10,14 +10,14 @@ test -x "$XDG_DATA_HOME/agentotel/current/bin/agentotel-mcp"
 test -s "$XDG_DATA_HOME/agentotel/current/manifest.sha256"
 runtime="$XDG_DATA_HOME/agentotel/current"
 test -f "$runtime/assets/docker-compose.yml"
-for context in app backend-health gateway grafana; do
+for context in src/app src/backend-health src/gateway src/grafana; do
   test -d "$runtime/assets/$context"
 done
-test -f "$runtime/assets/otel-collector/config.yaml"
+test -f "$runtime/assets/src/otel-collector/config.yaml"
 for dockerfile in collector victorialogs victoriametrics victoriatraces; do
-  test -f "$runtime/assets/backend-health/Dockerfile.$dockerfile"
+  test -f "$runtime/assets/src/backend-health/Dockerfile.$dockerfile"
 done
-grep -q 'context: ./backend-health' "$runtime/assets/docker-compose.yml"
+grep -q 'context: ./src/backend-health' "$runtime/assets/docker-compose.yml"
 if ! (cd "$XDG_DATA_HOME/agentotel/current" && sha256sum -c manifest.sha256 >/dev/null 2>&1); then
   (cd "$XDG_DATA_HOME/agentotel/current" && shasum -a 256 -c manifest.sha256 >/dev/null)
 fi

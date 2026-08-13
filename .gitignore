@@ -20,18 +20,8 @@ id_rsa
 id_rsa.pub
 id_ed25519
 
-# AgentOTel project-local runtime state; project.toml is the committed identity
-.agentotel/project.toml.tmp.*
-.agentotel/checkout_id
-.agentotel/checkout_id.tmp.*
-.agentotel/current
-.agentotel/previous
-.agentotel/run/
-.agentotel/runs/
-.agentotel/token*
-.agentotel/state/
-.agentotel/*.state
-.agentotel/*.log
+# AgentOTel project-local metadata and runtime state (generated locally)
+.agentotel/
 
 # OS/editor/IDE clutter
 .DS_Store
@@ -96,22 +86,22 @@ env/
 /artifacts/
 
 # Go build/test output. Keep *.go, go.mod, go.sum, and tests visible.
-gateway/bin/
-mcp/bin/
-backend-health/bin/
-mcp/mcp
-gateway/coverage/
-mcp/coverage/
-backend-health/coverage/
-gateway/*.out
-mcp/*.out
-backend-health/*.out
-gateway/*.prof
-mcp/*.prof
-backend-health/*.prof
-gateway/*.test
-mcp/*.test
-backend-health/*.test
+src/gateway/bin/
+src/mcp/bin/
+src/backend-health/bin/
+src/mcp/mcp
+src/gateway/coverage/
+src/mcp/coverage/
+src/backend-health/coverage/
+src/gateway/*.out
+src/mcp/*.out
+src/backend-health/*.out
+src/gateway/*.prof
+src/mcp/*.prof
+src/backend-health/*.prof
+src/gateway/*.test
+src/mcp/*.test
+src/backend-health/*.test
 *.exe
 *.exe~
 *.dll

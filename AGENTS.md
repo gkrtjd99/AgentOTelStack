@@ -15,7 +15,7 @@ You do **not** need any SDK or client library — just `curl` via these wrappers
 3. **Correlate** — take a `trace_id` from a failing request and run
    `./obs/correlate.sh <trace_id>` to see its spans, every related log line,
    and a same-service metrics snapshot.
-4. **Reason & change** — edit code under `./app` (or your own service).
+4. **Reason & change** — edit code under `./src/app` (or your own service).
 5. **Re-run** — `AGENTOTEL_DEV_MODE=1 ./bin/obs compose --profile demo up -d --build app` to restart with your change,
    then re-run the workload and compare the metrics. Repeat.
 
@@ -78,7 +78,7 @@ Common starting queries:
 ./workload/run.sh 300
 ./bin/obs credentials run -- ./obs/metrics.sh sample-app 15m
 
-# 2. edit app/src/index.js (e.g. fix the flaky checkout path)
+# 2. edit src/app/src/index.js (e.g. fix the flaky checkout path)
 
 # 3. rebuild just the app and re-run
 ./bin/obs compose --profile demo up -d --build app
@@ -100,7 +100,7 @@ Common starting queries:
 - **Log level field is `severity_text`** (`info`/`warn`/`error`), not `level`.
 - **Don't guess time ranges** — Gateway helpers accept bounded lookbacks such as
   `5m`, `15m`, `1h`, `6h`, and `24h`; they do not accept backend query syntax.
-- **The app is swappable.** To observe a different service, replace `./app` (keep
+- **The app is swappable.** To observe a different service, replace `./src/app` (keep
   it emitting authenticated OTLP to the Gateway) — everything else is unchanged.
 - After a fix, **leave the workload re-run output** so the next agent sees the
   before/after.

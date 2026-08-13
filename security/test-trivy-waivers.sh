@@ -30,7 +30,7 @@ fi
 cat >"$tmp/forged-label.json" <<JSON
 {"ArtifactName":"local-grafana:test","Metadata":{"ImageConfig":{"config":{"Labels":{"org.opencontainers.image.base.name":"grafana/grafana","org.opencontainers.image.base.digest":"sha256:0000000000000000000000000000000000000000000000000000000000000000"}}}},"Results":[]}
 JSON
-if WAIVER_FILE="$tmp/waiver.json" WAIVER_AS_OF=2026-08-12 GRAFANA_DOCKERFILE="$root/grafana/Dockerfile" \
+if WAIVER_FILE="$tmp/waiver.json" WAIVER_AS_OF=2026-08-12 GRAFANA_DOCKERFILE="$root/src/grafana/Dockerfile" \
   ARTIFACTS_DIR="$artifacts" "$root/scripts/verify-trivy-waivers.sh" local-grafana:test "$tmp/forged-label.json" >/dev/null 2>&1; then
   echo 'trivy-waiver-test: forged base label was accepted' >&2
   exit 1

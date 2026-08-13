@@ -46,7 +46,7 @@ for name, svc in model.get('services', {}).items():
 # the common regression where a hard-coded amd64 probe is silently copied into
 # an arm64 image.  The fallback to the builder's native Go target keeps plain
 # `docker build` usable while BuildKit supplies TARGETOS/TARGETARCH in CI.
-health_dir = root / 'backend-health'
+health_dir = root / 'src/backend-health'
 for df in sorted(health_dir.glob('Dockerfile.*')):
     text = df.read_text()
     if not re.search(r'^ARG\s+TARGETOS\s*$', text, re.M) or not re.search(r'^ARG\s+TARGETARCH\s*$', text, re.M):

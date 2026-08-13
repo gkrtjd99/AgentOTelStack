@@ -72,7 +72,18 @@ fi
 chmod 700 "$stage" "$data"
 # Runtime is self-contained: no command executed by an installed launcher reads the checkout.
 cp "$ROOT"/libexec/agentotel/*.sh "$stage/libexec/agentotel/"
-for d in app backend-health gateway grafana mcp otel-collector workload obs dashboards; do
+for d in app backend-health gateway grafana mcp otel-collector dashboards; do
+  if [ -d "$ROOT/src/$d" ]; then
+    mkdir -p "$stage/assets/src/$d"
+    mcp_binary_path=./not-mcp-binary
+    [ "$d" = mcp ] && mcp_binary_path=./mcp
+    (cd "$ROOT/src/$d" && find . \
+      \( -type d \( -name node_modules -o -name .git -o -name .cache -o -name bin -o -name build -o -name coverage -o -name dist -o -name tmp -o -name vendor \) -prune \) -o \
+      -type f -not -path "$mcp_binary_path" -not -name '*.log' -not -name '*.out' -not -name '*.prof' -not -name '*.test' \
+      -exec sh -c 'dest=$1; shift; for src do mkdir -p "$dest/$(dirname "$src")"; cp "$src" "$dest/$src"; done' sh "$stage/assets/src/$d" {} +)
+  fi
+done
+for d in workload obs; do
   if [ -d "$ROOT/$d" ]; then
     mkdir -p "$stage/assets/$d"
     (cd "$ROOT/$d" && find . -type f -not -path './node_modules/*' -not -path './.git/*' -not -name '*.log' -exec sh -c 'dest=$1; shift; for src do mkdir -p "$dest/$(dirname "$src")"; cp "$src" "$dest/$src"; done' sh "$stage/assets/$d" {} +)
@@ -83,10 +94,10 @@ cp "$ROOT/bin/obs" "$stage/libexec/agentotel/obs"
 printf '%s\n' "$ver" > "$stage/VERSION"; chmod 600 "$stage/VERSION"
 for required in \
   "$stage/assets/docker-compose.yml" \
-  "$stage/assets/backend-health/Dockerfile.collector" \
-  "$stage/assets/backend-health/Dockerfile.victorialogs" \
-  "$stage/assets/backend-health/Dockerfile.victoriametrics" \
-  "$stage/assets/backend-health/Dockerfile.victoriatraces"; do
+  "$stage/assets/src/backend-health/Dockerfile.collector" \
+  "$stage/assets/src/backend-health/Dockerfile.victorialogs" \
+  "$stage/assets/src/backend-health/Dockerfile.victoriametrics" \
+  "$stage/assets/src/backend-health/Dockerfile.victoriatraces"; do
   [ -f "$required" ] || { echo "install asset missing: $required" >&2; exit 1; }
 done
 # shellcheck disable=SC2094

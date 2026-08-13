@@ -12,7 +12,7 @@ command -v jq >/dev/null || { echo "jq is required" >&2; exit 2; }
 
 expected=$(jq -r '.image' "$waivers")
 [[ "$expected" =~ ^grafana/grafana@sha256:[0-9a-f]{64}$ ]] || { echo "waiver image must be an exact pinned Grafana upstream digest" >&2; exit 1; }
-dockerfile=${GRAFANA_DOCKERFILE:-grafana/Dockerfile}
+dockerfile=${GRAFANA_DOCKERFILE:-src/grafana/Dockerfile}
 [[ -f "$dockerfile" ]] || { echo "missing Grafana Dockerfile: $dockerfile" >&2; exit 2; }
 final_from=$(awk 'tolower($1) == "from" {last=$2} END {print last}' "$dockerfile")
 [[ "$final_from" == "$expected" ]] || { echo "waiver image $expected does not match final Grafana Dockerfile base $final_from" >&2; exit 1; }

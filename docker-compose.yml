@@ -18,7 +18,7 @@ networks:
 services:
   # ---- Storage: logs -------------------------------------------------------
   victorialogs:
-    build: {context: ./backend-health, dockerfile: Dockerfile.victorialogs}
+    build: {context: ./src/backend-health, dockerfile: Dockerfile.victorialogs}
     # Keep locally built images distinct for every installed runtime.  A
     # rollback must select the image built from that runtime's assets instead
     # of silently reusing a newer image under the same tag.
@@ -37,7 +37,7 @@ services:
 
   # ---- Storage: metrics ----------------------------------------------------
   victoriametrics:
-    build: {context: ./backend-health, dockerfile: Dockerfile.victoriametrics}
+    build: {context: ./src/backend-health, dockerfile: Dockerfile.victoriametrics}
     image: dev-observability/victoriametrics:v1.149.0-health-${AGENTOTEL_RUNTIME_VERSION:-dev}
     command:
       - -httpListenAddr=:8428
@@ -54,7 +54,7 @@ services:
 
   # ---- Storage: traces -----------------------------------------------------
   victoriatraces:
-    build: {context: ./backend-health, dockerfile: Dockerfile.victoriatraces}
+    build: {context: ./src/backend-health, dockerfile: Dockerfile.victoriatraces}
     image: dev-observability/victoriatraces:v0.10.0-health-${AGENTOTEL_RUNTIME_VERSION:-dev}
     command:
       - -storageDataPath=/vtraces
@@ -70,11 +70,11 @@ services:
 
   # ---- Fan-out collector ---------------------------------------------------
   otel-collector:
-    build: {context: ./backend-health, dockerfile: Dockerfile.collector}
+    build: {context: ./src/backend-health, dockerfile: Dockerfile.collector}
     image: dev-observability/otel-collector:v0.158.0-health-${AGENTOTEL_RUNTIME_VERSION:-dev}
     command: ["--config=/etc/otelcol/config.yaml"]
     volumes:
-      - ./otel-collector/config.yaml:/etc/otelcol/config.yaml:ro
+      - ./src/otel-collector/config.yaml:/etc/otelcol/config.yaml:ro
       - otelcol-queue:/var/lib/otelcol/queue
     logging:
       driver: json-file
@@ -107,7 +107,7 @@ services:
 
   gateway:
     build:
-      context: ./gateway
+      context: ./src/gateway
     image: dev-observability/gateway:${AGENTOTEL_RUNTIME_VERSION:-dev}
     environment:
       GATEWAY_VERSION: ${AGENTOTEL_RUNTIME_VERSION:-dev}
@@ -131,7 +131,7 @@ services:
   # shared infra (collector + stores). Your own apps run on the host and point at
   # http://localhost:4318. To run the bundled demo: `docker compose --profile demo up`.
   app:
-    build: ./app
+    build: ./src/app
     image: dev-observability/app:${AGENTOTEL_RUNTIME_VERSION:-dev}
     profiles: ["demo"]
     environment:
@@ -162,7 +162,7 @@ services:
   # The script-first agent interface remains obs/*.sh.
   grafana:
     build:
-      context: ./grafana
+      context: ./src/grafana
       dockerfile: Dockerfile
     image: dev-observability/grafana:${AGENTOTEL_RUNTIME_VERSION:-dev}
     profiles: ["dashboard"]
@@ -184,9 +184,9 @@ services:
       - "127.0.0.1:${GRAFANA_HOST_PORT:-3001}:3000"
     networks: [backend]
     volumes:
-      - ./grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
-      - ./grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
-      - ./dashboards:/etc/grafana/dashboards:ro
+      - ./src/grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
+      - ./src/grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./src/dashboards:/etc/grafana/dashboards:ro
       - grafana-data:/var/lib/grafana
     depends_on:
       victorialogs:

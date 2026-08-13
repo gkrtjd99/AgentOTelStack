@@ -96,7 +96,7 @@ Provisioned datasources:
 | VictoriaLogs | `victoriametrics-logs-datasource` v0.31.0 | `http://victorialogs:9428` |
 
 The Grafana dashboard is versioned at
-[`dashboards/local-observability.json`](../dashboards/local-observability.json).
+[`src/dashboards/local-observability.json`](../src/dashboards/local-observability.json).
 The Grafana 13.1.3 Ubuntu image is pinned by SHA-256 digest and bakes the
 official VictoriaLogs datasource plugin v0.31.0 at build time with a pinned
 release checksum. Plugins are loaded from immutable `/opt/grafana-plugins`,

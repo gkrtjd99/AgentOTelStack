@@ -29,7 +29,7 @@ source control.
 
 ### Node.js / TypeScript
 
-Copy `app/src/otel.js` and install the OpenTelemetry packages used by that
+Copy `src/app/src/otel.js` and install the OpenTelemetry packages used by that
 bootstrap, then start with `node --require ./otel.js your-entry.js`.
 
 ### Python
