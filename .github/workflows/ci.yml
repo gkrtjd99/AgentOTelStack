@@ -135,14 +135,16 @@ jobs:
       - name: Build images for scan
         run: |
           export COMPOSE_PROJECT_NAME=agentotel-supply-${{ github.run_id }}
+          export AGENTOTEL_RUNTIME_VERSION=ci-${{ github.run_id }}
           export AGENTOTEL_STACK_UUID=00000000-0000-4000-8000-000000000001 GATEWAY_INGEST_TOKEN=scan-ingest GATEWAY_QUERY_TOKEN=scan-query GF_SECURITY_ADMIN_PASSWORD=scan-password
           make setup
           docker compose --profile demo --profile dashboard build app gateway grafana
       - name: Trivy HIGH/CRITICAL gate (pinned image)
         run: |
           mkdir -p artifacts
-          for image in agentotel-supply-${{ github.run_id }}-app agentotel-supply-${{ github.run_id }}-gateway agentotel-supply-${{ github.run_id }}-grafana; do
-            if [[ "$image" == *-grafana ]]; then
+          runtime_tag="ci-${{ github.run_id }}"
+          for image in "dev-observability/app:${runtime_tag}" "dev-observability/gateway:${runtime_tag}" "dev-observability/grafana:${runtime_tag}"; do
+            if [[ "$image" == */grafana:* ]]; then
               docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v "$PWD:/src" -w /src aquasec/trivy:0.73.0@sha256:7cced7cae583819fc7806d4cbc0dbbc7cad18b99f7d3e235192e6da8c091045c image --format json --severity HIGH,CRITICAL "$image" > artifacts/grafana-trivy.json
               TRIVY_REPORT=artifacts/grafana-trivy.json ./scripts/verify-trivy-waivers.sh "$image" artifacts/grafana-trivy.json
             else
