@@ -112,6 +112,24 @@ app.get("/api/checkout", async (req, res) => {
 });
 
 const port = Number(process.env.PORT || 3000);
-app.listen(port, () => {
-  logger.info({ port }, "sample-app listening");
-});
+
+function createListenHandler(log, listenPort) {
+  return (err) => {
+    if (err) {
+      log.error({ err }, "sample-app failed to listen");
+      process.exitCode = 1;
+      return;
+    }
+    log.info({ port: listenPort }, "sample-app listening");
+  };
+}
+
+function startServer(listenPort = port) {
+  return app.listen(listenPort, createListenHandler(logger, listenPort));
+}
+
+if (require.main === module) {
+  startServer();
+}
+
+module.exports = { app, createListenHandler, startServer };
