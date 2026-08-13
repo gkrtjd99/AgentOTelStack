@@ -6,7 +6,7 @@ jobs:
   mcp:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: MCP format
         run: docker run --rm -v "$PWD/mcp:/src" -w /src golang:1.26.5-bookworm@sha256:53eeac89074db483fdf0ab3be1df32bf6e47562263d2d0d6baa7f26acb4957dd gofmt -d -e .
       - name: MCP tests
@@ -25,7 +25,7 @@ jobs:
   checks:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: shell syntax and compose config
         run: |
           find obs libexec scripts workload tests -type f -name '*.sh' -print0 | xargs -0 -n1 bash -n
@@ -113,7 +113,7 @@ jobs:
       GATEWAY_QUERY_TOKEN: ci-live-query-${{ github.run_id }}
       GF_SECURITY_ADMIN_PASSWORD: ci-live-grafana-${{ github.run_id }}
     steps:
-      - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Live stack, workload, contracts, and partial-backend gate
         run: ./scripts/test-ci-integration.sh
 
@@ -123,7 +123,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
       - name: Go vulnerability gate (pinned tool)
