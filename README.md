@@ -72,7 +72,7 @@ flowchart TD
   TraceID["Pick one failing trace_id<br/>from an error log or trace search"]
   Correlate["Correlate<br/>obs/correlate.sh trace_id"]
   Reason["Reason from spans + logs<br/>find the failing operation"]
-  Change["Change code<br/>app/ or your own service"]
+  Change["Change code<br/>src/app/ or your own service"]
   Rebuild["Rebuild and restart<br/>then rerun the workload"]
   Compare["Compare with baseline or target<br/>error rate, latency, failures"]
   Done["Done<br/>keep the measured result"]
@@ -170,6 +170,13 @@ arbitrary URL or write telemetry. Configure the installed binary at
 `${XDG_DATA_HOME:-$HOME/.local/share}/agentotel/current/bin/agentotel-mcp` and
 keep the config pointer/credentials private. See
 [`docs/CONNECT.md`](./docs/CONNECT.md) and [`docs/SECURITY.md`](./docs/SECURITY.md).
+
+Project metadata is generated locally in `.agentotel/` and is intentionally
+ignored by Git. The local `project.toml` gives a checkout its telemetry
+identity; it is not a shared source artifact. If upgrading an existing
+checkout, copy `.agentotel/project.toml` somewhere safe before upgrading when
+you need to preserve that checkout's telemetry identity, then restore it into
+the new checkout's `.agentotel/` directory.
 
 Safe lifecycle: run `obs setup`, then `obs up`; use `obs doctor` and
 `obs storage` for read-only health/storage checks. `obs down` preserves
@@ -273,7 +280,7 @@ Per-language setup (full detail in **[docs/CONNECT.md](./docs/CONNECT.md)**):
 
 | Language | What lands in your app folder | New files |
 |---|---|---|
-| **Node/TS** | copy `app/src/otel.js` + deps + `--require ./otel.js` | 1 (`otel.js`) |
+| **Node/TS** | copy `src/app/src/otel.js` + deps + `--require ./otel.js` | 1 (`otel.js`) |
 | **Python** | `pip install` + wrap launch with `opentelemetry-instrument` | 0 (env only) |
 | **Java** | `-javaagent:opentelemetry-javaagent.jar` | 1 (jar) |
 | **Go** | set up SDK in `main()` with OTLP/HTTP exporters | code edit |
@@ -291,12 +298,12 @@ Multiple apps? They all land in the same stores; filter by service name:
 | Path | What it is |
 |---|---|
 | `docker-compose.yml` | Orchestrates Gateway, collector, queue init, Victoria ×3, and the optional demo app |
-| `otel-collector/config.yaml` | OTLP receive → fan-out to the 3 stores |
-| `app/` | **Swappable** sample service (Node + explicit OTel bootstrap + lockfile). Replace with your own. |
+| `src/otel-collector/config.yaml` | OTLP receive → fan-out to the 3 stores |
+| `src/app/` | **Swappable** sample service (Node + explicit OTel bootstrap + lockfile). Replace with your own. |
 | `obs/` | Agent query tools using the authenticated Gateway: bounded logs/metrics/traces/correlation helpers |
 | `scripts/smoke.sh` | End-to-end write/read path verification |
-| `dashboards/local-observability.json` | Optional Grafana dashboard provisioned by the `dashboard` profile |
-| `grafana/provisioning/` | Grafana Metrics, VictoriaLogs, and Traces provisioning |
+| `src/dashboards/local-observability.json` | Optional Grafana dashboard provisioned by the `dashboard` profile |
+| `src/grafana/provisioning/` | Grafana Metrics, VictoriaLogs, and Traces provisioning |
 | `.github/workflows/ci.yml` | Static validation, npm audit, and Docker smoke test |
 | `workload/run.sh` | Synthetic load generator |
 | `e2e/` | Playwright browser UI journey |
@@ -390,7 +397,7 @@ flowchart TD
   TraceID["실패 trace_id 하나 선택<br/>에러 로그 또는 trace search에서"]
   Correlate["상관분석<br/>obs/correlate.sh trace_id"]
   Reason["span + log로 추론<br/>실패한 작업 찾기"]
-  Change["코드 변경<br/>app/ 또는 내 서비스"]
+  Change["코드 변경<br/>src/app/ 또는 내 서비스"]
   Rebuild["재빌드/재시작<br/>그 다음 워크로드 재실행"]
   Compare["기준값 또는 이전 실행과 비교<br/>에러율, 지연, 실패"]
   Done["완료<br/>측정 결과를 남김"]
@@ -581,7 +588,7 @@ export OTEL_EXPORTER_OTLP_HEADERS="Authorization=Bearer%20${GATEWAY_INGEST_TOKEN
 
 | 언어 | 내 앱 폴더에 생기는 것 | 새 파일 |
 |---|---|---|
-| **Node/TS** | `app/src/otel.js` 복사 + 의존성 + `--require ./otel.js` | 1개 (`otel.js`) |
+| **Node/TS** | `src/app/src/otel.js` 복사 + 의존성 + `--require ./otel.js` | 1개 (`otel.js`) |
 | **Python** | `pip install` + `opentelemetry-instrument`로 실행 감싸기 | 0개 (env만) |
 | **Java** | `-javaagent:opentelemetry-javaagent.jar` | 1개 (jar) |
 | **Go** | `main()`에 OTLP/HTTP exporter로 SDK 세팅 | 코드 수정 |
@@ -599,12 +606,12 @@ export OTEL_EXPORTER_OTLP_HEADERS="Authorization=Bearer%20${GATEWAY_INGEST_TOKEN
 | 경로 | 설명 |
 |---|---|
 | `docker-compose.yml` | Victoria 3종 + collector + app을 `dev-observability` 네트워크에 오케스트레이션 |
-| `otel-collector/config.yaml` | OTLP 수신 → 3종 저장소로 fan-out |
-| `app/` | **교체 가능한** 샘플 서비스 (Node + 명시적 OTel bootstrap + lockfile). 내 앱으로 바꿔 관측. |
+| `src/otel-collector/config.yaml` | OTLP 수신 → 3종 저장소로 fan-out |
+| `src/app/` | **교체 가능한** 샘플 서비스 (Node + 명시적 OTel bootstrap + lockfile). 내 앱으로 바꿔 관측. |
 | `obs/` | 인증된 Gateway를 사용하는 bounded logs/metrics/traces/correlation helper |
 | `scripts/smoke.sh` | write/read path 자동 검증 |
-| `dashboards/local-observability.json` | `dashboard` profile로 provision되는 선택형 Grafana dashboard |
-| `grafana/provisioning/` | Grafana datasource와 dashboard provider provisioning |
+| `src/dashboards/local-observability.json` | `dashboard` profile로 provision되는 선택형 Grafana dashboard |
+| `src/grafana/provisioning/` | Grafana datasource와 dashboard provider provisioning |
 | `.github/workflows/ci.yml` | 정적 검증, npm audit, Docker smoke test |
 | `workload/run.sh` | 합성 부하 생성기 |
 | `e2e/` | Playwright 브라우저 UI 여정 |

@@ -7,11 +7,11 @@ docker buildx version >/dev/null 2>&1 || { echo 'backend-health test requires Do
 
 for platform in linux/amd64 linux/arm64; do
   expected_arch=${platform#*/}
-  for dockerfile in backend-health/Dockerfile.*; do
+  for dockerfile in src/backend-health/Dockerfile.*; do
     name=$(basename "$dockerfile" | tr '[:upper:].' '[:lower:]_-')
     tag="agentotel-health-validation-${name}-${expected_arch}:local"
     docker buildx build --load --provenance=false --platform "$platform" \
-      --file "$dockerfile" --tag "$tag" backend-health >/dev/null
+      --file "$dockerfile" --tag "$tag" src/backend-health >/dev/null
     actual_arch=$(docker image inspect "$tag" --format '{{.Architecture}}')
     [[ "$actual_arch" == "$expected_arch" ]] || {
       echo "backend-health: $dockerfile built for $platform but image architecture is $actual_arch" >&2

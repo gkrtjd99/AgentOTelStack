@@ -57,7 +57,7 @@ Implemented services/config:
 - Provisioned VictoriaMetrics datasource
 - Provisioned VictoriaLogs datasource via `victoriametrics-logs-datasource`
 - Provisioned VictoriaTraces datasource via Grafana's Jaeger datasource
-- Prebuilt dashboard JSON under `dashboards/`
+- Prebuilt dashboard JSON under `src/dashboards/`
 
 Initial panels:
 

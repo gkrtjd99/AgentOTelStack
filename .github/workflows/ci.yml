@@ -8,13 +8,13 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: MCP format
-        run: docker run --rm -v "$PWD/mcp:/src" -w /src golang:1.26.5-bookworm@sha256:53eeac89074db483fdf0ab3be1df32bf6e47562263d2d0d6baa7f26acb4957dd gofmt -d -e .
+        run: docker run --rm -v "$PWD/src/mcp:/src" -w /src golang:1.26.5-bookworm@sha256:53eeac89074db483fdf0ab3be1df32bf6e47562263d2d0d6baa7f26acb4957dd gofmt -d -e .
       - name: MCP tests
-        run: docker run --rm -v "$PWD/mcp:/src" -w /src golang:1.26.5-bookworm@sha256:53eeac89074db483fdf0ab3be1df32bf6e47562263d2d0d6baa7f26acb4957dd go test ./...
+        run: docker run --rm -v "$PWD/src/mcp:/src" -w /src golang:1.26.5-bookworm@sha256:53eeac89074db483fdf0ab3be1df32bf6e47562263d2d0d6baa7f26acb4957dd go test ./...
       - name: MCP race
-        run: docker run --rm -v "$PWD/mcp:/src" -w /src golang:1.26.5-bookworm@sha256:53eeac89074db483fdf0ab3be1df32bf6e47562263d2d0d6baa7f26acb4957dd go test -race ./...
+        run: docker run --rm -v "$PWD/src/mcp:/src" -w /src golang:1.26.5-bookworm@sha256:53eeac89074db483fdf0ab3be1df32bf6e47562263d2d0d6baa7f26acb4957dd go test -race ./...
       - name: MCP build
-        run: docker run --rm -v "$PWD/mcp:/src" -w /src golang:1.26.5-bookworm@sha256:53eeac89074db483fdf0ab3be1df32bf6e47562263d2d0d6baa7f26acb4957dd go build ./...
+        run: docker run --rm -v "$PWD/src/mcp:/src" -w /src golang:1.26.5-bookworm@sha256:53eeac89074db483fdf0ab3be1df32bf6e47562263d2d0d6baa7f26acb4957dd go build ./...
       - name: MCP cross-build portability
         run: |
           for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64; do
@@ -37,12 +37,12 @@ jobs:
           while IFS= read -r -d '' script; do test_scripts+=("$script"); done < <(find tests -type f -name '*.sh' -print0)
           docker run --rm -v "$PWD:/src" -w /src koalaman/shellcheck-alpine:v0.10.0@sha256:5921d946dac740cbeec2fb1c898747b6105e585130cc7f0602eec9a10f7ddb63 shellcheck -x -e SC1091 bin/obs obs/*.sh libexec/agentotel/*.sh scripts/*.sh workload/*.sh "${test_scripts[@]}"
       - name: Go format
-        run: docker run --rm -v "$PWD/gateway:/src" -w /src golang:1.26.5-bookworm@sha256:53eeac89074db483fdf0ab3be1df32bf6e47562263d2d0d6baa7f26acb4957dd gofmt -d -e .
+        run: docker run --rm -v "$PWD/src/gateway:/src" -w /src golang:1.26.5-bookworm@sha256:53eeac89074db483fdf0ab3be1df32bf6e47562263d2d0d6baa7f26acb4957dd gofmt -d -e .
       - name: Go tests and race
         run: |
-          docker run --rm -v "$PWD/gateway:/src" -w /src golang:1.26.5-bookworm@sha256:53eeac89074db483fdf0ab3be1df32bf6e47562263d2d0d6baa7f26acb4957dd go test ./...
-          docker run --rm -v "$PWD/gateway:/src" -w /src golang:1.26.5-bookworm@sha256:53eeac89074db483fdf0ab3be1df32bf6e47562263d2d0d6baa7f26acb4957dd go test -race ./...
-          docker run --rm -v "$PWD/gateway:/src" -w /src golang:1.26.5-bookworm@sha256:53eeac89074db483fdf0ab3be1df32bf6e47562263d2d0d6baa7f26acb4957dd go build ./...
+          docker run --rm -v "$PWD/src/gateway:/src" -w /src golang:1.26.5-bookworm@sha256:53eeac89074db483fdf0ab3be1df32bf6e47562263d2d0d6baa7f26acb4957dd go test ./...
+          docker run --rm -v "$PWD/src/gateway:/src" -w /src golang:1.26.5-bookworm@sha256:53eeac89074db483fdf0ab3be1df32bf6e47562263d2d0d6baa7f26acb4957dd go test -race ./...
+          docker run --rm -v "$PWD/src/gateway:/src" -w /src golang:1.26.5-bookworm@sha256:53eeac89074db483fdf0ab3be1df32bf6e47562263d2d0d6baa7f26acb4957dd go build ./...
       - name: runtime authoritative checks
         run: tests/runtime/authoritative.sh
       - name: Gateway-only documentation contract
@@ -58,9 +58,9 @@ jobs:
           ./scripts/test-storage-pressure.sh
           ./security/test-trivy-waivers.sh
       - name: app tests
-        run: docker run --rm -v "$PWD:/src" -w /src/app node:22-alpine@sha256:c610fcdfb1d5b4740dd70c284ed3cb16bb857e0f7166196e36a5501df7a3aa32 sh -c 'npm ci && npm test'
+        run: docker run --rm -v "$PWD:/src" -w /src/src/app node:22-alpine@sha256:c610fcdfb1d5b4740dd70c284ed3cb16bb857e0f7166196e36a5501df7a3aa32 sh -c 'npm ci && npm test'
       - name: dependency audit
-        run: docker run --rm -v "$PWD/app:/app" -w /app node:22-alpine@sha256:c610fcdfb1d5b4740dd70c284ed3cb16bb857e0f7166196e36a5501df7a3aa32 sh -c 'npm ci && npm audit --audit-level=high'
+        run: docker run --rm -v "$PWD/src/app:/app" -w /app node:22-alpine@sha256:c610fcdfb1d5b4740dd70c284ed3cb16bb857e0f7166196e36a5501df7a3aa32 sh -c 'npm ci && npm audit --audit-level=high'
       - name: e2e dependency audit
         run: |
           cd e2e
@@ -70,11 +70,11 @@ jobs:
         run: |
           python3 - <<'PY'
           import json, pathlib
-          for path in pathlib.Path('gateway/schemas').glob('*.json'):
+          for path in pathlib.Path('src/gateway/schemas').glob('*.json'):
               json.loads(path.read_text())
           PY
-          grep -q 'Authorization' gateway/cmd/gateway/main.go
-          grep -q 'ValidateProject' gateway/cmd/gateway/main.go
+          grep -q 'Authorization' src/gateway/cmd/gateway/main.go
+          grep -q 'ValidateProject' src/gateway/cmd/gateway/main.go
           grep -q 'cardinality' libexec/agentotel/storage.sh
           grep -q 'volume identity mismatch' libexec/agentotel/reset.sh
           tmp="$(mktemp -d)"
@@ -90,11 +90,11 @@ jobs:
         run: |
           ./scripts/verify-image-provenance.sh
           ./scripts/test-backend-health.sh
-          docker run --rm -v "$PWD:/src" -w /src hadolint/hadolint:2.12.0@sha256:30a8fd2e785ab6176eed53f74769e04f125afb2f74a6c52aef7d463583b6d45e hadolint app/Dockerfile gateway/Dockerfile grafana/Dockerfile
+          docker run --rm -v "$PWD:/src" -w /src hadolint/hadolint:2.12.0@sha256:30a8fd2e785ab6176eed53f74769e04f125afb2f74a6c52aef7d463583b6d45e hadolint src/app/Dockerfile src/gateway/Dockerfile src/grafana/Dockerfile
       - name: VictoriaLogs plugin supply-chain gate
         run: |
-          if ! grep -Fq 'victoriametrics-logs-datasource-v0.31.0.tar.gz' grafana/Dockerfile; then exit 1; fi
-          if ! grep -Fq '6b6d7b27354ad972946318aac2a54f04363375e7cd5d1cad9d3bb74d00eb970b' grafana/Dockerfile; then exit 1; fi
+          if ! grep -Fq 'victoriametrics-logs-datasource-v0.31.0.tar.gz' src/grafana/Dockerfile; then exit 1; fi
+          if ! grep -Fq '6b6d7b27354ad972946318aac2a54f04363375e7cd5d1cad9d3bb74d00eb970b' src/grafana/Dockerfile; then exit 1; fi
           if grep -Fq 'GF_INSTALL_PLUGINS' docker-compose.yml; then exit 1; fi
           test "$(curl -fsSL 'https://github.com/VictoriaMetrics/victorialogs-datasource/releases/download/v0.31.0/victoriametrics-logs-datasource-v0.31.0.tar.gz' | sha256sum | awk '{print $1}')" = '6b6d7b27354ad972946318aac2a54f04363375e7cd5d1cad9d3bb74d00eb970b'
       - name: repository hygiene and action validation
@@ -130,9 +130,9 @@ jobs:
           fetch-depth: 0
       - name: Go vulnerability gate (pinned tool)
         run: |
-          docker run --rm -v "$PWD/gateway:/src" -w /src golang:1.26.5-bookworm@sha256:53eeac89074db483fdf0ab3be1df32bf6e47562263d2d0d6baa7f26acb4957dd \
+          docker run --rm -v "$PWD/src/gateway:/src" -w /src golang:1.26.5-bookworm@sha256:53eeac89074db483fdf0ab3be1df32bf6e47562263d2d0d6baa7f26acb4957dd \
             sh -ec 'GOBIN=/tmp/bin go install golang.org/x/vuln/cmd/govulncheck@v1.6.0 && /tmp/bin/govulncheck ./...'
-          docker run --rm -v "$PWD/mcp:/src" -w /src golang:1.26.5-bookworm@sha256:53eeac89074db483fdf0ab3be1df32bf6e47562263d2d0d6baa7f26acb4957dd \
+          docker run --rm -v "$PWD/src/mcp:/src" -w /src golang:1.26.5-bookworm@sha256:53eeac89074db483fdf0ab3be1df32bf6e47562263d2d0d6baa7f26acb4957dd \
             sh -ec 'GOBIN=/tmp/bin go install golang.org/x/vuln/cmd/govulncheck@v1.6.0 && /tmp/bin/govulncheck ./...'
       - name: Build images for scan
         run: |

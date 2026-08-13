@@ -1,6 +1,6 @@
 // Sample business logic under observation.
 //
-// Instrumentation is loaded by app/src/otel.js via:
+// Instrumentation is loaded by src/app/src/otel.js via:
 //   node --require ./src/otel.js src/index.js
 // It wires up OTLP traces, metrics, and logs from OTEL_* env vars
 // (see docker-compose.yml). The pino instrumentation bridges logs to OTLP,

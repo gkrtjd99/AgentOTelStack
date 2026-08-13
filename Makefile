@@ -96,13 +96,13 @@ mcp-build: ## Build the read-only MCP stdio adapter for this host
 	./scripts/build-mcp.sh bin/agentotel-mcp
 
 mcp-test: ## Test the MCP adapter
-	docker run --rm -v "$(PWD)/mcp:/src" -w /src golang:1.26.5-bookworm@sha256:53eeac89074db483fdf0ab3be1df32bf6e47562263d2d0d6baa7f26acb4957dd go test ./...
+	docker run --rm -v "$(PWD)/src/mcp:/src" -w /src golang:1.26.5-bookworm@sha256:53eeac89074db483fdf0ab3be1df32bf6e47562263d2d0d6baa7f26acb4957dd go test ./...
 
 mcp-fmt: ## Format MCP adapter
-	docker run --rm -v "$(PWD)/mcp:/src" -w /src golang:1.26.5-bookworm@sha256:53eeac89074db483fdf0ab3be1df32bf6e47562263d2d0d6baa7f26acb4957dd gofmt -w *.go
+	docker run --rm -v "$(PWD)/src/mcp:/src" -w /src golang:1.26.5-bookworm@sha256:53eeac89074db483fdf0ab3be1df32bf6e47562263d2d0d6baa7f26acb4957dd gofmt -w *.go
 
 mcp-race: ## Run MCP race tests
-	docker run --rm -v "$(PWD)/mcp:/src" -w /src golang:1.26.5-bookworm@sha256:53eeac89074db483fdf0ab3be1df32bf6e47562263d2d0d6baa7f26acb4957dd go test -race ./...
+	docker run --rm -v "$(PWD)/src/mcp:/src" -w /src golang:1.26.5-bookworm@sha256:53eeac89074db483fdf0ab3be1df32bf6e47562263d2d0d6baa7f26acb4957dd go test -race ./...
 
 ps: ## Show stack status
 	./bin/obs compose ps

@@ -1,7 +1,7 @@
 version: 2
 updates:
   - package-ecosystem: npm
-    directory: /app
+    directory: /src/app
     schedule: { interval: weekly }
   - package-ecosystem: npm
     directory: /e2e
