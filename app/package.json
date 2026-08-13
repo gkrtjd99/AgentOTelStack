@@ -17,7 +17,7 @@
     "@opentelemetry/exporter-trace-otlp-proto": "0.221.0",
     "@opentelemetry/instrumentation-pino": "0.67.0",
     "@opentelemetry/sdk-logs": "0.221.0",
-    "@opentelemetry/sdk-metrics": "2.9.0",
+    "@opentelemetry/sdk-metrics": "2.10.0",
     "@opentelemetry/sdk-node": "0.221.0",
     "express": "4.22.2",
     "pino": "9.14.0",
