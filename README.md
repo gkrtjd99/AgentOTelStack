@@ -219,10 +219,13 @@ guards. If `doctor` or `storage` reports `migration_required`, legacy or
 mismatched volumes are not deleted or relabeled automatically: stop, back up,
 copy, and verify them using the manual flow from `obs migrate volumes --confirm`.
 
-The optional Grafana profile bakes the VictoriaLogs datasource plugin v0.31.0
-with a pinned checksum and uses local authentication. Current upstream Grafana
-findings have only the narrow, time-bounded waivers in
-[`security/grafana-trivy-waivers.json`](./security/grafana-trivy-waivers.json).
+The optional Grafana profile uses a reproducible custom Grafana 13.1.3 repack:
+the server is built from the exact pinned Grafana source commit with Go 1.26.6
+and Tempo v2.10.3, while verified frontend assets come from the pinned upstream
+digest. The only supported plugin is the VictoriaLogs datasource v0.31.0; its
+backend is rebuilt from the pinned source commit and its frontend assets use a
+release checksum. Bundled upstream plugins are excluded, and the release image
+gate requires zero HIGH/CRITICAL findings. The image uses local authentication.
 
 ### Quick start
 
@@ -569,10 +572,13 @@ TTY와 정확한 stack UUID·Compose project·volume identity 검사를 요구�
 relabel하지 않습니다. `obs migrate volumes --confirm`이 안내하는 수동 백업·복사·검증 절차를
 따르세요.
 
-선택형 Grafana 프로필은 VictoriaLogs datasource plugin v0.31.0을 고정
-checksum으로 빌드하고 local authentication을 사용합니다. 최신 upstream
-Grafana 취약점은 [제한적이고 기간이 정해진 waiver](./security/grafana-trivy-waivers.json)만
-적용됩니다.
+선택형 Grafana 프로필은 정확히 고정된 Grafana 13.1.3 소스 커밋을 Go
+1.26.6 및 Tempo v2.10.3과 함께 빌드하고, 검증된 upstream frontend 자산을
+사용하는 재현 가능한 보안 repack입니다. 지원 플러그인은 VictoriaLogs
+datasource v0.31.0 하나이며 backend는 고정된 소스 커밋에서 다시 빌드하고
+frontend 자산은 release checksum으로 검증합니다. upstream bundled plugin은
+포함하지 않으며 release image gate는 HIGH/CRITICAL 0건을 요구합니다. local
+authentication을 사용합니다.
 
 ### 검증 재현
 

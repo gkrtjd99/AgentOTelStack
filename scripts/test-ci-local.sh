@@ -10,10 +10,11 @@ gate doc-contract ./scripts/test-doc-contract.sh
 gate json-schemas python3 -c 'import json,pathlib; [json.loads(p.read_text()) for p in pathlib.Path("src/gateway/schemas").glob("*.json")]'
 gate storage-pressure ./scripts/test-storage-pressure.sh
 gate security ./scripts/test-security.sh
+gate grafana-trivy-zero ./scripts/security/test-grafana-trivy-zero.sh
 gate cardinality ./scripts/test-cardinality.sh
 gate image-provenance ./scripts/verify-image-provenance.sh
 gate identity bash tests/runtime/identity_concurrency.sh
-if command -v shellcheck >/dev/null 2>&1; then gate shellcheck shellcheck -x -e SC1091 bin/obs obs/*.sh libexec/agentotel/*.sh scripts/*.sh workload/*.sh; elif command -v docker >/dev/null 2>&1; then gate shellcheck docker run --rm -v "$root:/src" -w /src koalaman/shellcheck-alpine:v0.10.0@sha256:5921d946dac740cbeec2fb1c898747b6105e585130cc7f0602eec9a10f7ddb63 shellcheck -x -e SC1091 bin/obs obs/*.sh libexec/agentotel/*.sh scripts/*.sh workload/*.sh; else echo 'SKIP shellcheck (shellcheck and docker not installed)'; skip=$((skip+1)); fi
+if command -v shellcheck >/dev/null 2>&1; then gate shellcheck shellcheck -x -e SC1091 bin/obs obs/*.sh libexec/agentotel/*.sh scripts/*.sh scripts/security/*.sh workload/*.sh; elif command -v docker >/dev/null 2>&1; then gate shellcheck docker run --rm -v "$root:/src" -w /src koalaman/shellcheck-alpine:v0.10.0@sha256:5921d946dac740cbeec2fb1c898747b6105e585130cc7f0602eec9a10f7ddb63 shellcheck -x -e SC1091 bin/obs obs/*.sh libexec/agentotel/*.sh scripts/*.sh scripts/security/*.sh workload/*.sh; else echo 'SKIP shellcheck (shellcheck and docker not installed)'; skip=$((skip+1)); fi
 if command -v docker >/dev/null 2>&1; then gate compose-config sh -c 'AGENTOTEL_STACK_UUID=00000000-0000-4000-8000-000000000001 GATEWAY_INGEST_TOKEN=ci-ingest-token GATEWAY_QUERY_TOKEN=ci-query-token GF_SECURITY_ADMIN_PASSWORD=ci-grafana-password docker compose --profile demo --profile dashboard config >/dev/null'; else echo 'SKIP compose-config (docker not installed)'; skip=$((skip+1)); fi
 if command -v npm >/dev/null 2>&1; then
   gate app-audit sh -c 'cd src/app && npm audit --package-lock-only --audit-level=high'

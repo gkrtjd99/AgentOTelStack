@@ -97,13 +97,24 @@ Provisioned datasources:
 
 The Grafana dashboard is versioned at
 [`src/dashboards/local-observability.json`](../src/dashboards/local-observability.json).
-The Grafana 13.1.3 Ubuntu image is pinned by SHA-256 digest and bakes the
-official VictoriaLogs datasource plugin v0.31.0 at build time with a pinned
-release checksum. Plugins are loaded from immutable `/opt/grafana-plugins`,
-outside the persistent `/var/lib/grafana` volume, so the data volume cannot
-mask the plugin. Startup preinstall, external core-plugin management, public
-key retrieval, and the plugin admin installer are disabled; the dashboard
-image does not download plugins at startup. The dashboard includes request rate, HTTP p95, order metrics, recent
+The custom Grafana 13.1.3 image is reproducible: its frontend/configuration
+assets come from the pinned upstream digest
+`sha256:ab5cb380e3ff3172d6c8bd2e7cfd31cce977d2881b260e1f5bc089bf0b759b43`,
+while the server is built from source commit
+`45a27d64b64a82d666b06aa5c5bb3521587edb0d` with Go 1.26.6 and the pinned
+Tempo v2.10.3 source (commit
+`4aeafc237b8d9a8d62e45735131e8a89eb741a00`). The VictoriaLogs v0.31.0 datasource frontend uses a
+verified release checksum and its backend is rebuilt from source commit
+`bb1f6d7b0ec2bdf943c2d8c27f2cb17004b147e8`.
+
+The supported plugin scope is exactly `victoriametrics-logs-datasource`.
+Plugins are loaded from immutable `/opt/grafana-plugins`, outside the
+persistent `/var/lib/grafana` volume, so the data volume cannot mask the
+plugin. The upstream server binary and bundled plugin directory are not
+copied; startup preinstall, external core-plugin management, public key
+retrieval, and the plugin admin installer are disabled. The image does not
+download plugins at startup, and its release scan must contain zero HIGH or
+CRITICAL findings. The dashboard includes request rate, HTTP p95, order metrics, recent
 error logs, and links
 back to the provisioned datasources plus the authenticated `obs/correlate.sh`
 workflow.
