@@ -14,8 +14,10 @@ cp "$root/scripts/verify-release-source.sh" "$repo/scripts/"
 printf '2.1.0\n' > "$repo/VERSION"
 
 git -C "$repo" init -q
-git -C "$repo" config user.email release-test@example.invalid
-git -C "$repo" config user.name release-test
+# Keep the synthetic repository self-contained: hosted runners may not have a
+# global Git identity, and this fixture must never modify the operator's one.
+git -C "$repo" config --local user.email release-test@example.invalid
+git -C "$repo" config --local user.name release-test
 git -C "$repo" add .
 git -C "$repo" commit -qm 'release fixture'
 git -C "$repo" tag -a v2.1.0 -m 'v2.1.0'
@@ -119,6 +121,8 @@ secret_case(){
   secret_repo=$t/secret-$name
   secret_out=$t/secret-out-$name
   git clone -q "$repo" "$secret_repo"
+  git -C "$secret_repo" config --local user.email release-test@example.invalid
+  git -C "$secret_repo" config --local user.name release-test
   git -C "$secret_repo" checkout -q v2.1.0
   mkdir -p "$secret_repo/$(dirname "$path")"
   printf 'must never ship\n' > "$secret_repo/$path"

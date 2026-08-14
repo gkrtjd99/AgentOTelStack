@@ -10,8 +10,8 @@ if printf '%s\n' "$metric_block" | grep -Fq 'delete_key(attributes,'; then
   echo 'cardinality-test: metric sanitizer must not duplicate deletes after allowlist' >&2
   exit 1
 fi
-go_image='golang:1.26.5-alpine@sha256:0178a641fbb4858c5f1b48e34bdaabe0350a330a1b1149aabd498d0699ff5fb2'
-race_image='golang:1.26.5-bookworm@sha256:53eeac89074db483fdf0ab3be1df32bf6e47562263d2d0d6baa7f26acb4957dd'
+go_image='golang:1.26.6-alpine@sha256:af8d6740070b8906d12eae1c3e3ea0957fb63f492051ea05e354c38ef9fe88df'
+race_image='golang:1.26.6-bookworm@sha256:116d58cbd88c1297624acc6e967a060012422bacf9930927e23fb719189c6f36'
 if command -v go >/dev/null 2>&1; then
   (cd src/gateway && go test ./internal/query/correlation ./internal/query -run 'TestDecode|TestValidate' -count=1)
   (cd src/gateway && go test -race ./internal/query/correlation ./internal/query -run 'TestDecode|TestValidate' -count=1)

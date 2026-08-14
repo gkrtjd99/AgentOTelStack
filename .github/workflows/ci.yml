@@ -8,13 +8,13 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: MCP format
-        run: docker run --rm -v "$PWD/src/mcp:/src" -w /src golang:1.26.5-bookworm@sha256:53eeac89074db483fdf0ab3be1df32bf6e47562263d2d0d6baa7f26acb4957dd gofmt -d -e .
+        run: docker run --rm -v "$PWD/src/mcp:/src" -w /src golang:1.26.6-bookworm@sha256:116d58cbd88c1297624acc6e967a060012422bacf9930927e23fb719189c6f36 gofmt -d -e .
       - name: MCP tests
-        run: docker run --rm -v "$PWD/src/mcp:/src" -w /src golang:1.26.5-bookworm@sha256:53eeac89074db483fdf0ab3be1df32bf6e47562263d2d0d6baa7f26acb4957dd go test ./...
+        run: docker run --rm -v "$PWD/src/mcp:/src" -w /src golang:1.26.6-bookworm@sha256:116d58cbd88c1297624acc6e967a060012422bacf9930927e23fb719189c6f36 go test ./...
       - name: MCP race
-        run: docker run --rm -v "$PWD/src/mcp:/src" -w /src golang:1.26.5-bookworm@sha256:53eeac89074db483fdf0ab3be1df32bf6e47562263d2d0d6baa7f26acb4957dd go test -race ./...
+        run: docker run --rm -v "$PWD/src/mcp:/src" -w /src golang:1.26.6-bookworm@sha256:116d58cbd88c1297624acc6e967a060012422bacf9930927e23fb719189c6f36 go test -race ./...
       - name: MCP build
-        run: docker run --rm -v "$PWD/src/mcp:/src" -w /src golang:1.26.5-bookworm@sha256:53eeac89074db483fdf0ab3be1df32bf6e47562263d2d0d6baa7f26acb4957dd go build ./...
+        run: docker run --rm -v "$PWD/src/mcp:/src" -w /src golang:1.26.6-bookworm@sha256:116d58cbd88c1297624acc6e967a060012422bacf9930927e23fb719189c6f36 go build ./...
       - name: MCP cross-build portability
         run: |
           for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64; do
@@ -37,12 +37,12 @@ jobs:
           while IFS= read -r -d '' script; do test_scripts+=("$script"); done < <(find tests -type f -name '*.sh' -print0)
           docker run --rm -v "$PWD:/src" -w /src koalaman/shellcheck-alpine:v0.10.0@sha256:5921d946dac740cbeec2fb1c898747b6105e585130cc7f0602eec9a10f7ddb63 shellcheck -x -e SC1091 bin/obs obs/*.sh libexec/agentotel/*.sh scripts/*.sh workload/*.sh "${test_scripts[@]}"
       - name: Go format
-        run: docker run --rm -v "$PWD/src/gateway:/src" -w /src golang:1.26.5-bookworm@sha256:53eeac89074db483fdf0ab3be1df32bf6e47562263d2d0d6baa7f26acb4957dd gofmt -d -e .
+        run: docker run --rm -v "$PWD/src/gateway:/src" -w /src golang:1.26.6-bookworm@sha256:116d58cbd88c1297624acc6e967a060012422bacf9930927e23fb719189c6f36 gofmt -d -e .
       - name: Go tests and race
         run: |
-          docker run --rm -v "$PWD/src/gateway:/src" -w /src golang:1.26.5-bookworm@sha256:53eeac89074db483fdf0ab3be1df32bf6e47562263d2d0d6baa7f26acb4957dd go test ./...
-          docker run --rm -v "$PWD/src/gateway:/src" -w /src golang:1.26.5-bookworm@sha256:53eeac89074db483fdf0ab3be1df32bf6e47562263d2d0d6baa7f26acb4957dd go test -race ./...
-          docker run --rm -v "$PWD/src/gateway:/src" -w /src golang:1.26.5-bookworm@sha256:53eeac89074db483fdf0ab3be1df32bf6e47562263d2d0d6baa7f26acb4957dd go build ./...
+          docker run --rm -v "$PWD/src/gateway:/src" -w /src golang:1.26.6-bookworm@sha256:116d58cbd88c1297624acc6e967a060012422bacf9930927e23fb719189c6f36 go test ./...
+          docker run --rm -v "$PWD/src/gateway:/src" -w /src golang:1.26.6-bookworm@sha256:116d58cbd88c1297624acc6e967a060012422bacf9930927e23fb719189c6f36 go test -race ./...
+          docker run --rm -v "$PWD/src/gateway:/src" -w /src golang:1.26.6-bookworm@sha256:116d58cbd88c1297624acc6e967a060012422bacf9930927e23fb719189c6f36 go build ./...
       - name: runtime authoritative checks
         run: tests/runtime/authoritative.sh
       - name: Gateway-only documentation contract
@@ -152,9 +152,9 @@ jobs:
           fetch-depth: 0
       - name: Go vulnerability gate (pinned tool)
         run: |
-          docker run --rm -v "$PWD/src/gateway:/src" -w /src golang:1.26.5-bookworm@sha256:53eeac89074db483fdf0ab3be1df32bf6e47562263d2d0d6baa7f26acb4957dd \
+          docker run --rm -v "$PWD/src/gateway:/src" -w /src golang:1.26.6-bookworm@sha256:116d58cbd88c1297624acc6e967a060012422bacf9930927e23fb719189c6f36 \
             sh -ec 'GOBIN=/tmp/bin go install golang.org/x/vuln/cmd/govulncheck@v1.6.0 && /tmp/bin/govulncheck ./...'
-          docker run --rm -v "$PWD/src/mcp:/src" -w /src golang:1.26.5-bookworm@sha256:53eeac89074db483fdf0ab3be1df32bf6e47562263d2d0d6baa7f26acb4957dd \
+          docker run --rm -v "$PWD/src/mcp:/src" -w /src golang:1.26.6-bookworm@sha256:116d58cbd88c1297624acc6e967a060012422bacf9930927e23fb719189c6f36 \
             sh -ec 'GOBIN=/tmp/bin go install golang.org/x/vuln/cmd/govulncheck@v1.6.0 && /tmp/bin/govulncheck ./...'
       - name: Build images for scan
         run: |
