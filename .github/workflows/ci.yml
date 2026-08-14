@@ -86,6 +86,28 @@ jobs:
           set -e
           test "$cardinality_rc" -eq 2
           test "$(set +e; XDG_CONFIG_HOME=/tmp/agentotel-ci-config XDG_DATA_HOME=/tmp/agentotel-ci-data XDG_STATE_HOME=/tmp/agentotel-ci-state libexec/agentotel/dispatch.sh reset >/dev/null 2>&1; echo $?)" -ne 0
+      - name: Release metadata
+        env:
+          CI_COMMIT: ${{ github.sha }}
+        run: |
+          set -eu
+          version="$(cat VERSION)"
+          test -n "$version"
+          test "$version" = "$(sed -n 's/^## \([0-9][0-9.]*\).*/\1/p' CHANGELOG.md | head -1)"
+          test "$version" = "$(sed -n 's/.*\"version\": \"\([^\"]*\)\".*/\1/p' src/app/package.json | head -1)"
+          test "$CI_COMMIT" = "$(git rev-parse HEAD)"
+          {
+            echo '### Release metadata'
+            echo "- version: \`$version\`"
+            echo "- commit: \`$CI_COMMIT\`"
+            echo "- tag format: \`vMAJOR.MINOR.PATCH\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Release unit tests
+        run: |
+          ./scripts/verify-release-version.sh
+          bash tests/runtime/release_version.sh
+          bash tests/release/source_archive.sh
+          bash tests/runtime/image_tags_rollback.sh
       - name: image digest and Dockerfile lint
         run: |
           ./scripts/verify-image-provenance.sh

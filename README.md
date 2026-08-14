@@ -151,10 +151,43 @@ Reproduce in [Reproduce](#reproduce).
 - Your app must emit **OTLP**. If it doesn't yet, see
   [docs/CONNECT.md](./docs/CONNECT.md) (Node / Python / Java / Go).
 
+### Versioned release install (2.1.0)
+
+The stable release is published as an immutable tag and two release assets: a
+source tarball and its SHA-256 checksum. Always download and verify the
+checksum before extracting or installing; do not substitute a moving branch
+archive or an asset from another tag.
+
+```bash
+VERSION=2.1.0
+BASE="https://github.com/gkrtjd99/AgentOTelStack/releases/download/v${VERSION}"
+curl -fLO "${BASE}/AgentOTelStack-v${VERSION}.tar.gz.sha256"
+curl -fLO "${BASE}/AgentOTelStack-v${VERSION}.tar.gz"
+sha256sum --check "AgentOTelStack-v${VERSION}.tar.gz.sha256"
+tar -xzf "AgentOTelStack-v${VERSION}.tar.gz"
+cd "AgentOTelStack-v${VERSION}"
+make install VERSION="${VERSION}"
+obs setup
+obs up
+```
+
+When using a mirror, use that mirror's owner/name in `BASE`. Release tags and
+assets are never moved or overwritten;
+the checksum detects download/storage corruption and confirms the tarball
+matches its paired asset. The GitHub tag/release is the trust boundary; a
+checksum downloaded from an untrusted mirror cannot establish provenance by
+itself.
+
+For development, clone a branch or an immutable tag and use the checkout
+launcher with `AGENTOTEL_DEV_MODE=1`; this deliberately exercises source files
+and is separate from the clone-independent release install. Before replacing
+an existing checkout or runtime, copy `.agentotel/project.toml` somewhere safe
+and restore it afterward to preserve that project's telemetry identity.
+
 ### Current install, MCP, and safety contract
 
 Install a self-contained, versioned runtime from a clone with `make install
-VERSION=2.0.1`. It lives at `~/.local/share/agentotel/2.0.1` (or the XDG data
+VERSION=2.1.0`. It lives at `~/.local/share/agentotel/2.1.0` (or the XDG data
 directory), with `current` and `previous` pointers; `~/.local/bin/obs runtime
 rollback` returns to the previous version. Launchers use the installed assets,
 not the clone, so the checkout may be moved or removed. Credentials are created
@@ -512,8 +545,8 @@ AGENTOTEL_DEV_MODE=1 ./bin/obs compose --profile dashboard up -d grafana
 
 ### 현재 설치·MCP·안전 계약
 
-클론에서 `make install VERSION=2.0.1`으로 자체 완결 버전 런타임을 설치합니다.
-`~/.local/share/agentotel/2.0.1`(또는 XDG 데이터 디렉터리)에 저장되고
+클론에서 `make install VERSION=2.1.0`으로 자체 완결 버전 런타임을 설치합니다.
+`~/.local/share/agentotel/2.1.0`(또는 XDG 데이터 디렉터리)에 저장되고
 `current`/`previous` 포인터가 생깁니다. `~/.local/bin/obs runtime rollback`으로
 이전 버전으로 되돌릴 수 있습니다. 실행 파일은 클론이 아닌 설치된 자산을
 사용하므로 클론을 옮기거나 삭제해도 됩니다. 자격 증명은 제한된 권한으로

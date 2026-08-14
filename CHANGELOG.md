@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.1.0 — 2026-08-14
+
+- Post-2.0.1 dependency and lockfile updates keep the app and e2e runtime
+  metadata aligned at 2.1.0.
+- Runtime and source layout changes keep the versioned install/rollback path,
+  `src/` service ownership, and `.agentotel/` project metadata consistent.
+- The release pipeline now validates strict core SemVer, package and lockfile
+  versions, changelog structure, and release-tag context before publication.
+
 ## 2.0.1 — 2026-08-13
 
 - Corrected Compose project identity resolution so demo workloads use the

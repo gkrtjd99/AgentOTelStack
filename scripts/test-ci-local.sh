@@ -5,6 +5,7 @@ pass=0; fail=0; skip=0
 gate(){ name=$1; shift; if "$@" >/dev/null 2>&1; then echo "PASS $name"; pass=$((pass+1)); else echo "FAIL $name"; fail=$((fail+1)); fi; }
 gate shell-syntax sh -c 'find obs libexec scripts workload tests -type f -name "*.sh" -print0 | xargs -0 -n1 bash -n; bash -n bin/obs'
 gate release-version ./scripts/verify-release-version.sh
+gate release-version-fixture ./tests/runtime/release_version.sh
 gate doc-contract ./scripts/test-doc-contract.sh
 gate json-schemas python3 -c 'import json,pathlib; [json.loads(p.read_text()) for p in pathlib.Path("src/gateway/schemas").glob("*.json")]'
 gate storage-pressure ./scripts/test-storage-pressure.sh

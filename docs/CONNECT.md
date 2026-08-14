@@ -98,7 +98,14 @@ provisioned datasource for logs; backend ports remain internal-only.
 ## Lifecycle and destructive boundaries
 
 ```bash
-make install VERSION=2.0.1  # versioned self-contained, clone-independent runtime
+VERSION=2.1.0
+BASE="https://github.com/gkrtjd99/AgentOTelStack/releases/download/v${VERSION}"
+curl -fLO "${BASE}/AgentOTelStack-v${VERSION}.tar.gz.sha256"
+curl -fLO "${BASE}/AgentOTelStack-v${VERSION}.tar.gz"
+sha256sum --check "AgentOTelStack-v${VERSION}.tar.gz.sha256"
+tar -xzf "AgentOTelStack-v${VERSION}.tar.gz"
+cd "AgentOTelStack-v${VERSION}"
+make install VERSION="${VERSION}" # immutable, clone-independent runtime
 ./bin/obs credentials ensure # also valid for a source checkout
 obs setup
 obs up                     # shared runtime; sample app profile off
@@ -108,6 +115,16 @@ obs down                   # stops services and preserves volumes
 obs reset --all --confirm  # interactive exact-volume reset (destructive)
 obs migrate volumes --confirm # manual legacy-volume migration guidance
 ```
+
+The release tag and assets are immutable. Download the checksum before the
+tarball and do not install until `sha256sum --check` succeeds; never replace a
+published asset under the same tag. This check detects corruption and verifies
+the paired asset, while the GitHub tag/release remains the provenance trust
+boundary. For development, clone the source (or an
+immutable tag) and use `AGENTOTEL_DEV_MODE=1 ./bin/obs ...` so changes are read
+from that checkout. Before replacing a checkout or installing a new runtime,
+copy `.agentotel/project.toml` and restore it afterward when the existing
+telemetry identity must be preserved.
 
 The reset command requires a TTY and a typed stack UUID, validates Compose
 project/volume identity, and removes only the exact stack volumes. Runtime
