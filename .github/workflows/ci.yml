@@ -35,7 +35,7 @@ jobs:
         run: |
           test_scripts=()
           while IFS= read -r -d '' script; do test_scripts+=("$script"); done < <(find tests -type f -name '*.sh' -print0)
-          docker run --rm -v "$PWD:/src" -w /src koalaman/shellcheck-alpine:v0.10.0@sha256:5921d946dac740cbeec2fb1c898747b6105e585130cc7f0602eec9a10f7ddb63 shellcheck -x -e SC1091 bin/obs obs/*.sh libexec/agentotel/*.sh scripts/*.sh workload/*.sh "${test_scripts[@]}"
+          docker run --rm -v "$PWD:/src" -w /src koalaman/shellcheck-alpine:v0.10.0@sha256:5921d946dac740cbeec2fb1c898747b6105e585130cc7f0602eec9a10f7ddb63 shellcheck -x -e SC1091 bin/obs obs/*.sh libexec/agentotel/*.sh scripts/*.sh scripts/security/*.sh workload/*.sh "${test_scripts[@]}"
       - name: Go format
         run: docker run --rm -v "$PWD/src/gateway:/src" -w /src golang:1.26.6-bookworm@sha256:116d58cbd88c1297624acc6e967a060012422bacf9930927e23fb719189c6f36 gofmt -d -e .
       - name: Go tests and race
@@ -56,7 +56,7 @@ jobs:
           ./scripts/test-security.sh
           ./scripts/test-cardinality.sh
           ./scripts/test-storage-pressure.sh
-          ./security/test-trivy-waivers.sh
+          ./scripts/security/test-grafana-trivy-zero.sh
       - name: app tests
         run: docker run --rm -v "$PWD:/src" -w /src/src/app node:22-alpine@sha256:c610fcdfb1d5b4740dd70c284ed3cb16bb857e0f7166196e36a5501df7a3aa32 sh -c 'npm ci && npm test'
       - name: dependency audit
@@ -143,7 +143,7 @@ jobs:
 
   supply-chain:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 60
     permissions:
       contents: read
     steps:
@@ -158,29 +158,55 @@ jobs:
             sh -ec 'GOBIN=/tmp/bin go install golang.org/x/vuln/cmd/govulncheck@v1.6.0 && /tmp/bin/govulncheck ./...'
       - name: Build images for scan
         run: |
-          export COMPOSE_PROJECT_NAME=agentotel-supply-${{ github.run_id }}
-          export AGENTOTEL_RUNTIME_VERSION=ci-${{ github.run_id }}
+          export COMPOSE_PROJECT_NAME=agentotel-supply-${{ github.run_id }}-${{ github.run_attempt }}
+          export AGENTOTEL_RUNTIME_VERSION=ci-${{ github.run_id }}-${{ github.run_attempt }}
           export AGENTOTEL_STACK_UUID=00000000-0000-4000-8000-000000000001 GATEWAY_INGEST_TOKEN=scan-ingest GATEWAY_QUERY_TOKEN=scan-query GF_SECURITY_ADMIN_PASSWORD=scan-password
           make setup
-          docker compose --profile demo --profile dashboard build app gateway grafana
-      - name: Trivy HIGH/CRITICAL gate (pinned image)
-        run: |
-          mkdir -p artifacts
-          runtime_tag="ci-${{ github.run_id }}"
-          for image in "dev-observability/app:${runtime_tag}" "dev-observability/gateway:${runtime_tag}" "dev-observability/grafana:${runtime_tag}"; do
-            if [[ "$image" == */grafana:* ]]; then
-              docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v "$PWD:/src" -w /src aquasec/trivy:0.73.0@sha256:7cced7cae583819fc7806d4cbc0dbbc7cad18b99f7d3e235192e6da8c091045c image --format json --severity HIGH,CRITICAL "$image" > artifacts/grafana-trivy.json
-              TRIVY_REPORT=artifacts/grafana-trivy.json ./scripts/verify-trivy-waivers.sh "$image" artifacts/grafana-trivy.json
-            else
-              docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy:0.73.0@sha256:7cced7cae583819fc7806d4cbc0dbbc7cad18b99f7d3e235192e6da8c091045c image --exit-code 1 --severity HIGH,CRITICAL "$image"
-            fi
+          docker compose --profile demo --profile dashboard build app gateway
+          for platform in linux/amd64 linux/arm64; do
+            arch="${platform#*/}"
+            docker buildx build --platform "$platform" --provenance=false --progress=plain \
+              --tag "dev-observability/grafana:ci-${{ github.run_id }}-${{ github.run_attempt }}-${arch}" \
+              --load ./src/grafana
           done
-      - name: Upload Trivy residual findings
+      - name: Trivy zero HIGH/CRITICAL gate (pinned image)
+        run: |
+          set -uo pipefail
+          mkdir -p artifacts
+          runtime_tag="ci-${{ github.run_id }}-${{ github.run_attempt }}"
+          scan_status=0
+          scan_image() {
+            image="$1"
+            report="$2"
+            platform="${3:-}"
+            if docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+                aquasec/trivy:0.73.0@sha256:7cced7cae583819fc7806d4cbc0dbbc7cad18b99f7d3e235192e6da8c091045c \
+                image --exit-code 1 --format json --no-progress --severity HIGH,CRITICAL "$image" >"$report"; then
+              trivy_status=0
+            else
+              trivy_status=$?
+            fi
+            if [[ ! -s "$report" ]]; then
+              echo "Trivy did not produce a report for $image" >&2
+              trivy_status=1
+            fi
+            if [[ -n "$platform" ]]; then
+              ARTIFACTS_DIR=artifacts ./scripts/security/verify-grafana-trivy-zero.sh "$image" "$report" "$platform" || trivy_status=1
+            fi
+            if [[ "$trivy_status" -ne 0 ]]; then scan_status=1; fi
+          }
+          scan_image "dev-observability/app:${runtime_tag}" artifacts/trivy-app.json
+          scan_image "dev-observability/gateway:${runtime_tag}" artifacts/trivy-gateway.json
+          scan_image "dev-observability/grafana:${runtime_tag}-amd64" artifacts/trivy-grafana-amd64.json linux/amd64
+          scan_image "dev-observability/grafana:${runtime_tag}-arm64" artifacts/trivy-grafana-arm64.json linux/arm64
+          exit "$scan_status"
+      - name: Upload Trivy reports
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: trivy-grafana-waiver-${{ github.run_id }}
+          name: trivy-reports-${{ github.run_id }}-${{ github.run_attempt }}
           path: artifacts/
+          if-no-files-found: error
       - name: Action workflow lint (pinned image)
         run: docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.12@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667
       - name: Secret scan (pinned gitleaks history)
@@ -189,4 +215,4 @@ jobs:
         run: docker run --rm -v "$PWD:/repo" zricethezav/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f dir --config=/repo/.gitleaks.toml --max-target-megabytes=5 --redact --no-banner /repo
       - name: Cleanup scan project
         if: always()
-        run: docker compose --project-name agentotel-supply-${{ github.run_id }} --profile demo --profile dashboard down -v --remove-orphans || true
+        run: docker compose --project-name agentotel-supply-${{ github.run_id }}-${{ github.run_attempt }} --profile demo --profile dashboard down -v --remove-orphans || true

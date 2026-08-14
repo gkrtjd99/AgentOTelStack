@@ -60,8 +60,8 @@ trap cleanup EXIT HUP INT TERM
 # The source artifact is intentionally an explicit allowlist.  In particular,
 # CI metadata and local/secret state are not implicitly included just because
 # they happen to be tracked in the repository.
-allowlist='.env.example .gitignore .gitleaks.toml AGENTS.md CLAUDE.md CHANGELOG.md LICENSE Makefile README.md VERSION docker-compose.yml bin libexec obs workload scripts security tests docs e2e src'
-required='VERSION LICENSE README.md CHANGELOG.md .env.example docker-compose.yml bin/obs scripts/install.sh scripts/uninstall.sh libexec/agentotel/dispatch.sh src/app/Dockerfile src/app/package.json src/app/package-lock.json src/backend-health/Dockerfile.collector src/backend-health/Dockerfile.victorialogs src/backend-health/Dockerfile.victoriametrics src/backend-health/Dockerfile.victoriatraces src/backend-health/health.go src/gateway/Dockerfile src/gateway/go.mod src/gateway/cmd/gateway/main.go src/mcp/go.mod src/mcp/main.go src/otel-collector/config.yaml src/grafana/Dockerfile src/dashboards/local-observability.json'
+allowlist='.env.example .gitignore .gitleaks.toml AGENTS.md CLAUDE.md CHANGELOG.md LICENSE Makefile README.md VERSION docker-compose.yml bin libexec obs workload scripts tests docs e2e src'
+required='VERSION LICENSE README.md CHANGELOG.md .env.example docker-compose.yml bin/obs scripts/install.sh scripts/uninstall.sh libexec/agentotel/dispatch.sh src/app/Dockerfile src/app/package.json src/app/package-lock.json src/backend-health/Dockerfile.collector src/backend-health/Dockerfile.victorialogs src/backend-health/Dockerfile.victoriametrics src/backend-health/Dockerfile.victoriatraces src/backend-health/health.go src/gateway/Dockerfile src/gateway/go.mod src/gateway/cmd/gateway/main.go src/mcp/go.mod src/mcp/main.go src/otel-collector/config.yaml src/grafana/Dockerfile src/grafana/run.sh src/grafana/NOTICE src/dashboards/local-observability.json'
 
 git ls-tree -r "$commit" > "$entries" || fail 'unable to inspect tagged tree'
 git ls-tree -r --name-only "$commit" > "$names" || fail 'unable to inspect tagged paths'

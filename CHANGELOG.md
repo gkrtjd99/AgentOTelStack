@@ -8,6 +8,10 @@
   `src/` service ownership, and `.agentotel/` project metadata consistent.
 - The release pipeline now validates strict core SemVer, package and lockfile
   versions, changelog structure, and release-tag context before publication.
+- Grafana is now a reproducible security repack: pinned v13.1.3 source and
+  frontend assets, Go 1.26.6, Tempo v2.10.3, and a source-rebuilt VictoriaLogs
+  v0.31.0 backend are assembled with no bundled plugins; the image gate requires
+  zero HIGH/CRITICAL findings.
 
 ## 2.0.1 — 2026-08-13
 
@@ -54,9 +58,9 @@
   exact SHA-256 checksum
   `6b6d7b27354ad972946318aac2a54f04363375e7cd5d1cad9d3bb74d00eb970b`.
   Local authentication is enabled.
-- Narrow upstream Grafana CVE waivers are tracked in
-  [`security/grafana-trivy-waivers.json`](security/grafana-trivy-waivers.json)
-  and expire 2026-09-11.
+- The Grafana security repack uses a single supported VictoriaLogs datasource
+  plugin and is scanned with the same zero HIGH/CRITICAL policy as the other
+  release images.
 
 ### Validation
 
@@ -64,7 +68,7 @@ The full local CI-equivalent gate set passed, including Gateway/MCP gofmt,
 `go test` and `go test -race`, project/credential tests, atomic install/symlink
 tests, release-version and `git diff --check` validation. Gitleaks passed for
 the full history and source snapshot; fresh app and Gateway Trivy scans found
-zero HIGH/CRITICAL findings; the exact Grafana waiver, pinned backend health
+zero HIGH/CRITICAL findings across the release images, pinned backend health
 images on amd64/arm64, and related supply-chain checks passed.
 
 Isolated live integration passed wrong-token `401` and valid-token `200`,
@@ -93,10 +97,11 @@ pre-assert that outcome.
 인증 Gateway(4318 ingest/17777 query), `make install VERSION=2.0.0` 기반
 버전 설치·롤백, 세 개의 읽기 전용 MCP 도구, 안전한 storage/reset 및 수동
 migration 보호를 도입했습니다. VictoriaLogs plugin v0.31.0은 지정된 SHA-256
-checksum으로 고정되며 Grafana CVE waiver는 2026-09-11에 만료됩니다.
+checksum으로 고정되고 Grafana 보안 repack은 HIGH/CRITICAL 0건 정책을
+적용합니다.
 로컬 CI-equivalent gate 전체를 통과했고 Gateway/MCP 포맷·테스트·race,
 project/credential 및 atomic install/symlink 검증, 전체 이력·소스 Gitleaks,
-app/Gateway Trivy HIGH/CRITICAL 0건, Grafana waiver, amd64/arm64 backend health,
+app/Gateway/Grafana Trivy HIGH/CRITICAL 0건, amd64/arm64 backend health,
 인증과 `error=true`를 포함한 3-backend correlation 및 VictoriaLogs 장애·복구를
 확인했습니다. 이전 hosted push는 실패했으며 이 수정이 이를 보완합니다. PR #1의
 GitHub-hosted CI/supply-chain checks가 publication gate이고 최종 상태는 PR checks에

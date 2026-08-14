@@ -191,7 +191,7 @@ while IFS= read -r link_path; do
 done < "$symlinks"
 rm -f "$symlinks"
 
-required='VERSION LICENSE README.md CHANGELOG.md .env.example docker-compose.yml bin/obs scripts/install.sh scripts/uninstall.sh libexec/agentotel/dispatch.sh src/app/Dockerfile src/app/package.json src/app/package-lock.json src/backend-health/Dockerfile.collector src/backend-health/Dockerfile.victorialogs src/backend-health/Dockerfile.victoriametrics src/backend-health/Dockerfile.victoriatraces src/backend-health/health.go src/gateway/Dockerfile src/gateway/go.mod src/gateway/cmd/gateway/main.go src/mcp/go.mod src/mcp/main.go src/otel-collector/config.yaml src/grafana/Dockerfile src/dashboards/local-observability.json'
+required='VERSION LICENSE README.md CHANGELOG.md .env.example docker-compose.yml bin/obs scripts/install.sh scripts/uninstall.sh libexec/agentotel/dispatch.sh src/app/Dockerfile src/app/package.json src/app/package-lock.json src/backend-health/Dockerfile.collector src/backend-health/Dockerfile.victorialogs src/backend-health/Dockerfile.victoriametrics src/backend-health/Dockerfile.victoriatraces src/backend-health/health.go src/gateway/Dockerfile src/gateway/go.mod src/gateway/cmd/gateway/main.go src/mcp/go.mod src/mcp/main.go src/otel-collector/config.yaml src/grafana/Dockerfile src/grafana/run.sh src/grafana/NOTICE src/dashboards/local-observability.json'
 for path in $required; do
   [ -f "$extract/$root_name/$path" ] || fail "required release file is missing: $path"
   [ ! -L "$extract/$root_name/$path" ] || fail "required release file is a symlink: $path"

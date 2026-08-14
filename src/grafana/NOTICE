@@ -1,0 +1,20 @@
+AgentOTelStack Grafana dashboard image notices
+
+This image contains the following reviewed upstream components.  The complete
+license texts are installed under /usr/share/grafana/licenses in the image.
+
+* Grafana 13.1.3, source commit
+  45a27d64b64a82d666b06aa5c5bb3521587edb0d, licensed under AGPL-3.0-only.
+* Grafana Tempo v2.10.3, source commit
+  4aeafc237b8d9a8d62e45735131e8a89eb741a00, licensed under AGPL-3.0-only.
+  Tempo's complete LICENSING.md is included with the source license, along
+  with its Apache-2.0 text for the pkg/tempopb subtree.
+* VictoriaLogs datasource v0.31.0, source commit
+  bb1f6d7b0ec2bdf943c2d8c27f2cb17004b147e8, licensed under Apache-2.0.
+
+The source and release archives are pinned in the Dockerfile by SHA-256.  The
+runtime contains only the Grafana frontend/configuration assets and the
+source-built server and VictoriaLogs backend; it does not contain Grafana's
+bundled plugins or upstream prebuilt backend binaries.  Tempo's license files
+are installed under /usr/share/grafana/licenses/tempo, with the Apache-2.0
+text at pkg/tempopb/LICENSE_APACHE2 as identified by LICENSING.md.

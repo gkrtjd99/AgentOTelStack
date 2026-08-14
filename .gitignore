@@ -82,7 +82,7 @@ env/
 # Trivy vulnerability database and filesystem analysis cache
 .trivy-cache/
 
-# CI-generated reports (security waivers remain tracked under security/)
+# CI-generated reports (security policy/test scripts remain tracked under scripts/security/)
 /artifacts/
 
 # Go build/test output. Keep *.go, go.mod, go.sum, and tests visible.
