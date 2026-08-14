@@ -6,10 +6,39 @@ source repository to remain checked out.
 
 ## Install and start
 
+### Stable release (2.1.0)
+
+Use the immutable GitHub release assets for a reproducible installation. Fetch
+the checksum first, then the tarball, verify it before extraction, and install
+from the verified source tree:
+
+```bash
+VERSION=2.1.0
+BASE="https://github.com/gkrtjd99/AgentOTelStack/releases/download/v${VERSION}"
+curl -fLO "${BASE}/AgentOTelStack-v${VERSION}.tar.gz.sha256"
+curl -fLO "${BASE}/AgentOTelStack-v${VERSION}.tar.gz"
+sha256sum --check "AgentOTelStack-v${VERSION}.tar.gz.sha256"
+tar -xzf "AgentOTelStack-v${VERSION}.tar.gz"
+cd "AgentOTelStack-v${VERSION}"
+make install VERSION="${VERSION}"
+```
+
+The `v2.1.0` tag and its assets are immutable: do not replace an asset or
+silently reuse a tag. A changed checksum is a different release and should be
+investigated before installation. The checksum detects corruption and confirms
+the tarball matches the paired release asset; trust the GitHub tag/release (or
+an independently verified mirror) for provenance.
+
+For source development, clone the repository (or check out an immutable tag)
+and run the checkout launcher with `AGENTOTEL_DEV_MODE=1`. A source checkout
+is intentionally different from the clone-independent release runtime. Before
+upgrading either one, copy `.agentotel/project.toml` to a safe location and
+restore it after the upgrade when the existing telemetry identity must survive.
+
 From a clone, run:
 
 ```bash
-make install VERSION=2.0.1
+make install VERSION=2.1.0
 obs setup
 obs up
 obs doctor
@@ -25,9 +54,11 @@ values remain supported as explicit operator overrides.
 
 Project metadata is generated locally in `.agentotel/` and is ignored by Git.
 The local `.agentotel/project.toml` supplies the checkout's telemetry identity;
-it is not a shared source artifact. Before upgrading an existing checkout,
-copy that file somewhere safe if you need to preserve the same identity, then
-restore it into the new checkout's `.agentotel/` directory.
+it is not a shared source artifact. The release checksum protects the downloaded
+asset, while this local file preserves identity independently of the release
+version. Before upgrading an existing checkout, copy that file somewhere safe
+if you need to preserve the same identity, then restore it into the new
+checkout's `.agentotel/` directory.
 
 `obs setup` creates and labels the exact persistent volumes. `obs up` starts
 the shared six-service runtime: Gateway, collector, queue initializer, and

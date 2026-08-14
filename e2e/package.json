@@ -1,6 +1,6 @@
 {
   "name": "e2e-runner",
-  "version": "2.0.1",
+  "version": "2.1.0",
   "private": true,
   "description": "Browser UI journey against the sample app. Generates telemetry the agent can observe.",
   "scripts": {
