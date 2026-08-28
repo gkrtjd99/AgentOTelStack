@@ -1,141 +1,123 @@
-# Dashboard and Overview
+# Dashboard and terminal overview
 
-This stack keeps the agent-facing path script-first. The dashboard layer is
-there for quick human inspection, without adding another required service to
-the default stack.
+[English](./DASHBOARD.md) · [한국어](./ko/DASHBOARD.md)
 
-## Terminal Overview
+The Go Dashboard is the repository's sole browser UI. It is an optional human
+inspection console; the authenticated `obs/*.sh` helpers and terminal overview
+remain the authoritative agent interface.
 
-Run:
+## Terminal overview
 
-```bash
-make dashboard SERVICE=sample-app
-make dashboard SERVICE=sample-app MODE=compact LOOKBACK=15m
-```
-
-or directly:
+The terminal overview presents the Gateway's bounded `GET /v1/context` envelope:
 
 ```bash
-./bin/obs credentials run -- ./obs/overview.sh sample-app 15m
-./bin/obs credentials run -- ./obs/overview.sh --compact --lookback 15m sample-app
-./bin/obs credentials run -- ./obs/overview.sh --json --since 15m sample-app
+make overview SERVICE=sample-app MODE=compact LOOKBACK=15m
+AGENTOTEL_DEV_MODE=1 ./bin/obs credentials run -- ./obs/overview.sh --compact --lookback 15m sample-app
+AGENTOTEL_DEV_MODE=1 ./bin/obs credentials run -- ./obs/overview.sh --json --since 1h sample-app
 ```
 
-The overview prints:
+Allowed lookbacks are exactly `5m`, `15m`, `1h`, `6h`, and `24h`; `30m` is not a
+supported value. The overview does not promise a business metric, an orders
+ratio, p95 latency, or a particular backend result shape. For one failure, take
+a 32-hex trace ID from the evidence and use
+`./obs/correlate.sh <trace-id>` through the credential runner.
 
-- services seen by traces and recent logs
-- metric availability for the selected service
-- `orders_processed_total` by outcome, if the app emits it
-- current-counter error ratio, if the app emits `orders_processed_total`
-- lookback-window p95 latency, if the app emits `order_processing_seconds`
-- recent error logs
-- recent error traces with credential-runner `obs/correlate.sh <trace_id>` suggestions
-- the authenticated Gateway query surface and optional Grafana UI
+## Start the browser Dashboard
 
-For a different local app, use its `OTEL_SERVICE_NAME`:
+The stable checkout-owned lifecycle is Make-only:
 
 ```bash
-make dashboard SERVICE=my-app
-make dashboard SERVICE=my-app MODE=compact LOOKBACK=30m
-./bin/obs credentials run -- ./obs/overview.sh --json --since 30m my-app
-./bin/obs credentials run -- ./obs/app.sh summary my-app
+make dashboard
+# open the exact `dashboard bootstrap URL: .../#token=...` line
+make dashboard-down
 ```
 
-## Built-in UIs
+`make dashboard` force-recreates the Dashboard service for the checkout's
+stable Compose project, generates a fresh cryptographically secure client token,
+proves Gateway-backed readiness, and prints one bootstrap URL. The default host
+binding is loopback `http://127.0.0.1:3001`; `DASHBOARD_HOST_PORT` may select a
+deliberate alternate loopback port. Open the printed fragment URL, not the
+fragment-free base URL. The browser consumes the fragment, replaces it with
+`#overview`, keeps the token only in memory, and sends it only in a Dashboard
+Authorization header. A full reload intentionally requires reopening the
+printed URL.
 
-These are optional inspection tools. The supported automation path remains the
-authenticated credential-runner form of `./obs/*.sh`.
+The client credential is exactly 64 lowercase hexadecimal characters and is
+different from the Gateway query token. It is not persisted in the canonical
+credential file, static assets, HTML, cookies, Web Storage, request query
+parameters, or logs. The Gateway query token and fixed workspace project remain
+server-side. Static assets and local health are public; `/api/*` requests
+without the client credential receive a generic 401.
 
-| Signal | URL | Notes |
-|---|---|---|
-| Metrics | — | Use the authenticated `obs` helpers or Grafana; VictoriaMetrics is internal |
-| Logs | — | Use the authenticated `obs` helpers or Grafana's pinned VictoriaLogs plugin |
-| Traces | — | Use the authenticated `obs` helpers or Grafana; VictoriaTraces is internal |
-
-If a UI endpoint changes in a Victoria release, the script helpers are still the
-source of truth because they call the query APIs directly.
-
-## Multi-app Helpers
-
-Use `obs/app.sh` when several apps report to the same stack:
+For a direct source Compose start, provide a valid distinct token yourself; the
+binary does not expose a token endpoint:
 
 ```bash
-./bin/obs credentials run -- ./obs/app.sh services
-./bin/obs credentials run -- ./obs/app.sh summary my-app
-./bin/obs credentials run -- ./obs/app.sh errors my-app 15m 20
-./bin/obs credentials run -- ./obs/app.sh traces my-app 20 1h
-./bin/obs credentials run -- ./obs/app.sh metrics my-app
+export DASHBOARD_CLIENT_TOKEN=<64-lowercase-hex-token>
+AGENTOTEL_DEV_MODE=1 ./bin/obs compose --profile dashboard up -d --build dashboard
+# open http://127.0.0.1:3001/#token=$DASHBOARD_CLIENT_TOKEN
 ```
 
-The Gateway helpers filter by service name and hide backend-specific field
-spelling and query syntax.
+The supported Make path is preferred because it owns project resolution,
+credential injection, readiness, and the printed bootstrap URL. `make
+ dashboard-down` stops only the Dashboard service. `make dev-down` stops both
+optional profiles while preserving telemetry volumes.
 
-## Optional Grafana UI
+## Bounded API
 
-Grafana is behind the `dashboard` compose profile, so the default `make up`
-stack remains the Gateway, collector, queue initializer, and three Victoria
-backends (with the sample app and Grafana profiles off).
+The Dashboard is a same-origin server-side adapter. It exposes only these
+read routes:
 
-Run:
+| Route | Method | Bounded input |
+| --- | --- | --- |
+| `/api/services` | `GET` | No query parameters |
+| `/api/context` | `GET` | `service`, `lookback`, and `limit` |
+| `/api/errors` | `GET` | `service`, `lookback`, and `limit` |
+| `/api/correlate` | `POST` | JSON `trace_id` and optional bounded `limit` |
+| `/health` | `GET` | Loopback callers, no query string |
+| `/` and `/assets/*` | `GET`, `HEAD` | Embedded, validated assets |
+
+Every `/api/*` route requires exactly one
+`Authorization: Dashboard <64-lowercase-hex-token>` header. Unknown or duplicate
+JSON fields, unknown query parameters, invalid service names, invalid lookbacks,
+malformed trace IDs, and out-of-range limits are rejected before the Gateway is
+contacted. The proxy supplies only the fixed workspace project and server-side
+Gateway query credential. It exposes no raw LogQL/PromQL/Jaeger query, telemetry
+write route, arbitrary backend URL, CORS proxy, or browser project selector.
+
+The Dashboard preserves `partial`, `truncated`, no-data, and backend status
+states as evidence. It is a bounded operating console, not a general
+visualization or historical time-series product. Use [`QUERY.md`](./QUERY.md)
+for the Gateway contract and the shell helpers for agent workflows.
+
+## Runtime hardening
+
+`src/dashboard` is a split-ready Go module using the standard library and
+embedded static assets. The Compose image is built from a pinned Go builder and
+runs as a non-root numeric user in a scratch image with the builder CA bundle,
+no shell/package manager, no writable application volume, and a self-health
+probe. The Dashboard and Gateway share a dedicated network; the app and Victoria
+stores do not join it. Victoria backend ports remain Docker-internal.
+
+The module is stateless: no telemetry write route, cookies, sessions, persistent
+browser state, or database. Upstream redirects are not followed and response
+and request sizes are bounded. See [`SECURITY.md`](./SECURITY.md) for the
+threat model and [`../src/dashboard/README.md`](../src/dashboard/README.md) for
+module build/configuration details.
+
+## Browser E2E lifecycle
+
+Playwright journeys are deliberately Make-managed so they cannot silently run
+against stale services:
 
 ```bash
-make grafana
+make e2e             # demo + Dashboard profiles, complete suite
+make e2e-app         # demo profile, sample-app journey only
+make e2e-dashboard   # dashboard spec only; starts demo + Dashboard profiles
 ```
 
-Open:
-
-- Grafana: <http://localhost:3001>
-- Provisioned dashboard: `ObservabilityStack / Local Observability`
-
-Provisioned datasources:
-
-| Name | Type | Backend |
-|---|---|---|
-| VictoriaMetrics | Prometheus-compatible | `http://victoriametrics:8428` |
-| VictoriaTraces | Jaeger-compatible | `http://victoriatraces:10428/select/jaeger` |
-| VictoriaLogs | `victoriametrics-logs-datasource` v0.31.0 | `http://victorialogs:9428` |
-
-The Grafana dashboard is versioned at
-[`src/dashboards/local-observability.json`](../src/dashboards/local-observability.json).
-The Grafana 13.1.3 Ubuntu image is pinned by SHA-256 digest and bakes the
-official VictoriaLogs datasource plugin v0.31.0 at build time with a pinned
-release checksum. Plugins are loaded from immutable `/opt/grafana-plugins`,
-outside the persistent `/var/lib/grafana` volume, so the data volume cannot
-mask the plugin. Startup preinstall, external core-plugin management, public
-key retrieval, and the plugin admin installer are disabled; the dashboard
-image does not download plugins at startup. The dashboard includes request rate, HTTP p95, order metrics, recent
-error logs, and links
-back to the provisioned datasources plus the authenticated `obs/correlate.sh`
-workflow.
-
-Grafana is local-only and bound to `127.0.0.1:3001`. Anonymous access is off;
-login requires the configured `GF_SECURITY_ADMIN_PASSWORD` (the username
-defaults to `admin`). No default admin password is documented or assumed.
-
-### Grafana Usage Examples
-
-Start with the demo data:
-
-```bash
-make demo
-./workload/run.sh 100
-make grafana
-```
-
-Open <http://localhost:3001>, then select
-`ObservabilityStack / Local Observability`.
-
-Typical checks:
-
-| Need | Grafana panel | Equivalent agent command |
-|---|---|---|
-| Is the app reporting? | Service variable and HTTP panels | `./bin/obs credentials run -- ./obs/app.sh services` |
-| Are orders failing? | Orders By Outcome / Order Error Ratio | `./bin/obs credentials run -- ./obs/metrics.sh sample-app 15m` |
-| Is latency high? | HTTP p95 Latency / Order p95 Latency | `make dashboard SERVICE=sample-app MODE=compact LOOKBACK=15m` |
-| Which requests failed? | Recent Error Logs | `./bin/obs credentials run -- ./obs/app.sh errors sample-app 15m 20` |
-| What happened in one failure? | Trace Workflow links | `./bin/obs credentials run -- ./obs/correlate.sh <trace_id>` |
-
-For your own app, set the dashboard `service` variable to its
-`OTEL_SERVICE_NAME`. If business metrics such as `orders_processed_total` do
-not exist, the generic HTTP panels still work as long as the app emits standard
-OpenTelemetry HTTP metrics.
+Direct `cd e2e && npm test` is unsupported. The Make-owned runner selects an
+isolated project, creates the required labeled volumes, starts the profiles,
+waits for app/Gateway/Dashboard evidence, and cleans up its resources. The
+Dashboard journey needs the demo app because it exercises live errors and trace
+correlation even though only `dashboard.spec.js` is selected.

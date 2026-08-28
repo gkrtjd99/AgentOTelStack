@@ -6,15 +6,21 @@ root=$(git rev-parse --show-toplevel 2>/dev/null) || die 'not a git project'; fi
 checkout_file(){ git rev-parse --git-path agentotel-checkout-id 2>/dev/null; }
 project_lock="$dir.lock"
 lock_project(){
-  [ ! -L "$project_lock" ] || die 'symlink rejected'
-  i=0
-  while ! mkdir "$project_lock" 2>/dev/null; do
-    i=$((i+1)); [ "$i" -lt 100 ] || die 'project busy' 75
-    sleep .01
-  done
-  trap unlock_project EXIT
+  lock_acquire "$project_lock" project 1000
+  project_lock_token=$AGENTOTEL_LOCK_TOKEN
+  trap cleanup_project EXIT
+  trap 'exit 1' HUP INT TERM
 }
-unlock_project(){ rmdir "$project_lock" 2>/dev/null || :; trap - EXIT; }
+cleanup_project(){
+  project_rc=$?
+  trap - EXIT HUP INT TERM
+  lock_release "$project_lock" "$project_lock_token" >/dev/null 2>&1 || :
+  exit "$project_rc"
+}
+unlock_project(){
+  lock_release "$project_lock" "$project_lock_token" >/dev/null 2>&1 || :
+  trap - EXIT HUP INT TERM
+}
 parse(){
   [ -f "$file" ] || die 'project not initialized'; reject_symlink "$dir"; reject_symlink "$file"
   awk 'BEGIN{s=0;p=0} /^[[:space:]]*schema[[:space:]]*=[[:space:]]*1[[:space:]]*$/ {s++;next} /^[[:space:]]*project_id[[:space:]]*=[[:space:]]*"[^"]+"[[:space:]]*$/ {p++;next} /^[[:space:]]*$/ {next} {exit 2} END{if(s!=1||p!=1)exit 2}' "$file" || die 'invalid project.toml'
@@ -23,7 +29,7 @@ parse(){
 }
 init_unlocked(){ [ ! -e "$file" ] || die 'project already initialized'; [ ! -L "$dir" ] || die 'symlink rejected'; mkdir -p "$dir"; id=$(rand_uuid_v4); valid_project_uuid "$id" || die 'generated invalid project UUID'; tmp="$file.tmp.$$"; { echo 'schema = 1'; echo "project_id = \"$id\""; } >"$tmp"; chmod 600 "$tmp"; mv "$tmp" "$file"; ensure_checkout; echo '{"status":"initialized"}'; }
 init(){ lock_project; init_unlocked; unlock_project; }
-rekey(){ parse; id=$(rand_uuid_v4); valid_project_uuid "$id" || die 'generated invalid project UUID'; tmp="$file.tmp.$$"; { echo 'schema = 1'; echo "project_id = \"$id\""; } >"$tmp"; chmod 600 "$tmp"; mv "$tmp" "$file"; echo '{"status":"rekeyed"}'; }
+rekey(){ lock_project; parse; id=$(rand_uuid_v4); valid_project_uuid "$id" || die 'generated invalid project UUID'; tmp="$file.tmp.$$"; { echo 'schema = 1'; echo "project_id = \"$id\""; } >"$tmp"; chmod 600 "$tmp"; mv "$tmp" "$file"; echo '{"status":"rekeyed"}'; unlock_project; }
 ensure_checkout(){
   [ ! -L "$dir" ] || die 'symlink rejected'; cf=$(checkout_file); [ -n "$cf" ] || die 'git metadata unavailable'; mkdir -p "$(dirname "$cf")"
   reject_symlink "$cf"

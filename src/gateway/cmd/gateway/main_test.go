@@ -5,10 +5,15 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
+	"os/exec"
+	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -482,5 +487,367 @@ func TestTokenFileSupportsRawAndXDGJSON(t *testing.T) {
 	got, err = tokenFile(jsonFile, "query_token")
 	if err != nil || got != "query-secret" {
 		t.Fatalf("JSON token = %q, err = %v", got, err)
+	}
+}
+
+func TestProjectPreservesCanonicalDashboardFieldsOnly(t *testing.T) {
+	in := map[string]any{
+		"_time":        "2026-08-23T12:34:56.789Z",
+		"service.name": "checkout",
+		"servicename":  "worker",
+		"message":      "payment failed",
+		"processes": map[string]any{
+			"p1": map[string]any{
+				"serviceName": "checkout",
+				"body":        "must be dropped",
+			},
+		},
+		"http.url": "https://example.test/private",
+	}
+	got, ok := project(in).(map[string]any)
+	if !ok {
+		t.Fatalf("project type = %T", project(in))
+	}
+	for key, want := range map[string]string{
+		"_time": "2026-08-23T12:34:56.789Z", "service.name": "checkout", "servicename": "worker",
+	} {
+		if got[key] != want {
+			t.Fatalf("canonical field %q = %#v, want %q; projected=%#v", key, got[key], want, got)
+		}
+	}
+	processes, ok := got["processes"].(map[string]any)
+	if !ok {
+		t.Fatalf("projected processes = %#v", got["processes"])
+	}
+	process, ok := processes["p1"].(map[string]any)
+	if !ok || process["serviceName"] != "checkout" {
+		t.Fatalf("Jaeger process serviceName lost: %#v", processes)
+	}
+	if _, ok := process["body"]; ok {
+		t.Fatalf("raw process body escaped projection: %#v", process)
+	}
+	if _, ok := got["http.url"]; ok {
+		t.Fatalf("raw URL escaped projection: %#v", got)
+	}
+}
+
+func TestErrorsHandlerForwardsBoundedLookbackAndCorrectPartialSemantics(t *testing.T) {
+	const project = "550e8400-e29b-41d4-a716-446655440000"
+	cases := []struct {
+		name            string
+		lookback        string
+		traceBody       string
+		wantDuration    time.Duration
+		wantTraceStatus string
+		wantPartial     bool
+	}{
+		{name: "recent non-empty traces", lookback: "5m", traceBody: `{"data":[{"spans":[],"processes":{}}]}`, wantDuration: 5 * time.Minute, wantTraceStatus: "ok"},
+		{name: "empty traces are no-data", lookback: "1h", traceBody: `{"data":[]}`, wantDuration: time.Hour, wantTraceStatus: "no_matching_data", wantPartial: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var traceQuery url.Values
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case "/select/logsql/query":
+					_, _ = w.Write([]byte(`[{"severity_text":"error"}]`))
+				case "/select/jaeger/api/traces":
+					traceQuery = r.URL.Query()
+					_, _ = w.Write([]byte(tc.traceBody))
+				default:
+					http.NotFound(w, r)
+				}
+			}))
+			defer server.Close()
+
+			c := config{queryToken: "query-secret", querySem: make(chan struct{}, 1), query: query.Client{Logs: server.URL, Traces: server.URL}}
+			r := httptest.NewRequest(http.MethodGet, "http://gateway/v1/errors?service=checkout&project="+project+"&lookback="+tc.lookback+"&limit=25", nil)
+			r.Header.Set("Authorization", "Bearer query-secret")
+			rr := httptest.NewRecorder()
+			queryHandler(c, "/v1/errors")(rr, r)
+			if rr.Code != http.StatusOK {
+				t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
+			}
+			var envelope struct {
+				Partial  bool `json:"partial"`
+				Backends []struct {
+					Name   string `json:"name"`
+					Status string `json:"status"`
+				} `json:"backends"`
+			}
+			if err := json.Unmarshal(rr.Body.Bytes(), &envelope); err != nil {
+				t.Fatalf("decode envelope: %v", err)
+			}
+			traceStatus := ""
+			for _, backend := range envelope.Backends {
+				if backend.Name == "traces" {
+					traceStatus = backend.Status
+				}
+			}
+			if traceStatus != tc.wantTraceStatus || envelope.Partial != tc.wantPartial {
+				t.Fatalf("trace status/partial = %q/%t, want %q/%t; body=%s", traceStatus, envelope.Partial, tc.wantTraceStatus, tc.wantPartial, rr.Body.String())
+			}
+			if traceQuery.Get("service") != "checkout" || traceQuery.Get("limit") != "25" || traceQuery.Get("lookback") != "" {
+				t.Fatalf("trace filters = %#v", traceQuery)
+			}
+			var tags map[string]string
+			if err := json.Unmarshal([]byte(traceQuery.Get("tags")), &tags); err != nil {
+				t.Fatalf("trace tags: %v", err)
+			}
+			if tags["error"] != "true" || tags["resource_attr:project"] != project {
+				t.Fatalf("trace tags = %#v", tags)
+			}
+			start, err := strconv.ParseInt(traceQuery.Get("start"), 10, 64)
+			if err != nil {
+				t.Fatalf("trace start = %q: %v", traceQuery.Get("start"), err)
+			}
+			end, err := strconv.ParseInt(traceQuery.Get("end"), 10, 64)
+			if err != nil {
+				t.Fatalf("trace end = %q: %v", traceQuery.Get("end"), err)
+			}
+			if end-start != tc.wantDuration.Microseconds() {
+				t.Fatalf("trace window = %d microseconds, want %d", end-start, tc.wantDuration.Microseconds())
+			}
+		})
+	}
+}
+
+func TestErrorsAndCorrelationCarryProjectScopeAndUnavailableIsPartial(t *testing.T) {
+	const project = "550e8400-e29b-41d4-a716-446655440000"
+	const traceID = "0123456789abcdef0123456789abcdef"
+	var logQueries []string
+	var metricQueries []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/select/logsql/query":
+			query := r.URL.Query().Get("query")
+			logQueries = append(logQueries, query)
+			if strings.Contains(query, `severity_text:"error"`) {
+				_, _ = w.Write([]byte(`[{"severity_text":"error","service.name":"checkout"}]`))
+			} else {
+				_, _ = w.Write([]byte(`[{"trace_id":"` + traceID + `"}]`))
+			}
+		case "/api/v1/query":
+			metricQueries = append(metricQueries, r.URL.Query().Get("query"))
+			_, _ = w.Write([]byte(`{"status":"success","data":{"resultType":"vector","result":[{"metric":{"service_name":"checkout"},"value":[1700000060,"1"]}]}}`))
+		case "/select/jaeger/api/traces/" + traceID:
+			_, _ = w.Write([]byte(`{"data":[{"spans":[{"spanID":"span-1","operationName":"checkout","startTime":1700000000000,"duration":1000,"processID":"p1"}],"processes":{"p1":{"serviceName":"checkout","tags":[{"key":"project","value":"` + project + `"}]}}}]}`))
+		case "/select/jaeger/api/traces":
+			_, _ = w.Write([]byte(`{"data":[{"spans":[],"processes":{}}]}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	c := config{queryToken: "query-secret", querySem: make(chan struct{}, 4), query: query.Client{Logs: server.URL, Metrics: server.URL, Traces: server.URL}}
+
+	errReq := httptest.NewRequest(http.MethodGet, "http://gateway/v1/errors?service=checkout&project="+project+"&lookback=15m&limit=5", nil)
+	errReq.Header.Set("Authorization", "Bearer query-secret")
+	errRR := httptest.NewRecorder()
+	queryHandler(c, "/v1/errors")(errRR, errReq)
+	if errRR.Code != http.StatusOK {
+		t.Fatalf("errors status=%d body=%s", errRR.Code, errRR.Body.String())
+	}
+	if len(logQueries) == 0 || !strings.Contains(logQueries[0], `project:"`+project+`"`) {
+		t.Fatalf("errors project scope = %#v", logQueries)
+	}
+	var errorsEnvelope struct {
+		Partial bool `json:"partial"`
+	}
+	if err := json.Unmarshal(errRR.Body.Bytes(), &errorsEnvelope); err != nil || errorsEnvelope.Partial {
+		t.Fatalf("errors envelope partial=%t err=%v body=%s", errorsEnvelope.Partial, err, errRR.Body.String())
+	}
+
+	corrReq := httptest.NewRequest(http.MethodPost, "http://gateway/v1/correlate", strings.NewReader(`{"trace_id":"`+traceID+`","project":"`+project+`"}`))
+	corrReq.Header.Set("Authorization", "Bearer query-secret")
+	corrReq.Header.Set("Content-Type", "application/json")
+	corrRR := httptest.NewRecorder()
+	queryHandler(c, "/v1/correlate")(corrRR, corrReq)
+	if corrRR.Code != http.StatusOK {
+		t.Fatalf("correlate status=%d body=%s", corrRR.Code, corrRR.Body.String())
+	}
+	if len(logQueries) < 2 || !strings.Contains(logQueries[len(logQueries)-1], `project:"`+project+`"`) {
+		t.Fatalf("correlate log project scope = %#v", logQueries)
+	}
+	if len(metricQueries) == 0 || !strings.Contains(metricQueries[len(metricQueries)-1], `project="`+project+`"`) {
+		t.Fatalf("correlate metric project scope = %#v", metricQueries)
+	}
+
+	unavailable := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/select/logsql/query" {
+			http.Error(w, "backend unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		_, _ = w.Write([]byte(`{"data":[{"spans":[],"processes":{}}]}`))
+	}))
+	defer unavailable.Close()
+	unavailableConfig := config{queryToken: "query-secret", querySem: make(chan struct{}, 1), query: query.Client{Logs: unavailable.URL, Traces: unavailable.URL}}
+	unavailableReq := httptest.NewRequest(http.MethodGet, "http://gateway/v1/errors?project="+project, nil)
+	unavailableReq.Header.Set("Authorization", "Bearer query-secret")
+	unavailableRR := httptest.NewRecorder()
+	queryHandler(unavailableConfig, "/v1/errors")(unavailableRR, unavailableReq)
+	var unavailableEnvelope struct {
+		Partial  bool `json:"partial"`
+		Backends []struct {
+			Name   string `json:"name"`
+			Status string `json:"status"`
+		} `json:"backends"`
+	}
+	if err := json.Unmarshal(unavailableRR.Body.Bytes(), &unavailableEnvelope); err != nil {
+		t.Fatal(err)
+	}
+	if !unavailableEnvelope.Partial {
+		t.Fatalf("backend outage not partial: %s", unavailableRR.Body.String())
+	}
+}
+
+func TestGatewayBindsBothListenersBeforeServing(t *testing.T) {
+	for _, tc := range []struct {
+		ingest string
+		query  string
+	}{
+		{ingest: "", query: "127.0.0.1:0"},
+		{ingest: "not-an-address", query: "127.0.0.1:0"},
+		{ingest: "127.0.0.1:0", query: "127.0.0.1:bad"},
+	} {
+		if ingest, query, err := bindListeners(tc.ingest, tc.query); err == nil {
+			_ = ingest.Close()
+			_ = query.Close()
+			t.Fatalf("malformed listeners accepted: %#v", tc)
+		}
+	}
+	occupiedQuery, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer occupiedQuery.Close()
+	if ingest, query, err := bindListeners("127.0.0.1:0", occupiedQuery.Addr().String()); err == nil {
+		_ = ingest.Close()
+		_ = query.Close()
+		t.Fatal("occupied query listener accepted")
+	}
+	probe, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	probeAddr := probe.Addr().String()
+	_ = probe.Close()
+	if ingest, query, err := bindListeners(probeAddr, occupiedQuery.Addr().String()); err == nil {
+		_ = ingest.Close()
+		_ = query.Close()
+		t.Fatal("occupied query listener accepted on retry probe")
+	}
+	reclaimed, err := net.Listen("tcp", probeAddr)
+	if err != nil {
+		t.Fatalf("first listener leaked after second bind failure: %v", err)
+	}
+	_ = reclaimed.Close()
+}
+
+func TestBackendOperationalFailureSemantics(t *testing.T) {
+	for _, tc := range []struct {
+		status  string
+		partial bool
+	}{
+		{status: "ok", partial: false},
+		{status: "no_matching", partial: false},
+		{status: "no_matching_data", partial: false},
+		{status: "trace_not_stored", partial: false},
+		{status: "signal_not_observed", partial: false},
+		{status: "unsupported", partial: false},
+		{status: "backend_unavailable", partial: true},
+		{status: "timeout", partial: true},
+		{status: "backend_decode_error", partial: true},
+		{status: "integrity_error", partial: true},
+	} {
+		if got := backendOperationalFailure(tc.status); got != tc.partial {
+			t.Errorf("status %q partial=%t, want %t", tc.status, got, tc.partial)
+		}
+	}
+}
+
+func TestQueryEnvelopePartialOnlyOperationalFailures(t *testing.T) {
+	const project = "550e8400-e29b-41d4-a716-446655440000"
+	var operational atomic.Bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/select/logsql/query" && operational.Load() {
+			http.Error(w, "backend unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		switch r.URL.Path {
+		case "/select/logsql/query":
+			_, _ = w.Write([]byte(`[]`))
+		case "/select/jaeger/api/traces":
+			_, _ = w.Write([]byte(`{"data":[]}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	c := config{queryToken: "query-secret", querySem: make(chan struct{}, 1), query: query.Client{Logs: server.URL, Traces: server.URL}}
+	requestEnvelope := func() bool {
+		r := httptest.NewRequest(http.MethodGet, "http://gateway/v1/errors?project="+project+"&lookback=15m&limit=5", nil)
+		r.Header.Set("Authorization", "Bearer query-secret")
+		rr := httptest.NewRecorder()
+		queryHandler(c, "/v1/errors")(rr, r)
+		var body struct {
+			Partial bool `json:"partial"`
+		}
+		if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+			t.Fatalf("decode envelope: %v body=%s", err, rr.Body.String())
+		}
+		return body.Partial
+	}
+	if requestEnvelope() {
+		t.Fatal("evidence absence incorrectly marked partial")
+	}
+	operational.Store(true)
+	if !requestEnvelope() {
+		t.Fatal("backend outage was not marked partial")
+	}
+}
+
+func TestGatewayStartupFailureSubprocess(t *testing.T) {
+	if os.Getenv("TASK30_GATEWAY_STARTUP_HELPER") == "1" {
+		main()
+		return
+	}
+	cases := []struct {
+		name   string
+		ingest string
+		query  string
+	}{
+		{name: "malformed", ingest: "not-an-address", query: "127.0.0.1:0"},
+	}
+	occupied, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer occupied.Close()
+	cases = append(cases, struct {
+		name   string
+		ingest string
+		query  string
+	}{name: "occupied", ingest: "127.0.0.1:0", query: occupied.Addr().String()})
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestGatewayStartupFailureSubprocess$")
+			cmd.Env = append(os.Environ(),
+				"TASK30_GATEWAY_STARTUP_HELPER=1",
+				"GATEWAY_INGEST_TOKEN=ingest-secret",
+				"GATEWAY_QUERY_TOKEN=query-secret",
+				"GATEWAY_COLLECTOR_URL=http://collector:4318",
+				"GATEWAY_INGEST_LISTEN_ADDR="+tc.ingest,
+				"GATEWAY_QUERY_LISTEN_ADDR="+tc.query,
+			)
+			if err := cmd.Run(); err == nil {
+				t.Fatal("startup failure subprocess exited successfully")
+			}
+			if ctx.Err() != nil {
+				t.Fatalf("startup failure subprocess exceeded bound: %v", ctx.Err())
+			}
+		})
 	}
 }

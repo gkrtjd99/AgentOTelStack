@@ -5,6 +5,19 @@ ARG TARGETARCH
 WORKDIR /src
 COPY health.go .
 RUN set -eu; echo "native builder=${BUILDPLATFORM} target=${TARGETOS}/${TARGETARCH}"; GOOS="${TARGETOS:-$(go env GOOS)}" GOARCH="${TARGETARCH:-$(go env GOARCH)}" CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o /health-probe health.go
-FROM victoriametrics/victoria-traces:v0.10.0@sha256:66e784a595c4a88e5b1dfab5d153dea442cf1caaeae4d67839c550414c33b3b0
+
+# Rebuild from the pinned release source so the binary contains the patched Go
+# stdlib rather than the vulnerable version embedded in the published image.
+FROM --platform=$BUILDPLATFORM golang:1.26.6-bookworm@sha256:116d58cbd88c1297624acc6e967a060012422bacf9930927e23fb719189c6f36 AS upstream-build
+ARG TARGETOS
+ARG TARGETARCH
+WORKDIR /src
+RUN git clone --depth 1 --branch v0.11.0 https://github.com/VictoriaMetrics/VictoriaTraces.git . \
+ && test "$(git rev-parse HEAD)" = f4a9fc1ccca59474dc410a2f24f6c2fe2c9b7ec4 \
+ && CGO_ENABLED=0 GOOS="${TARGETOS:-$(go env GOOS)}" GOARCH="${TARGETARCH:-$(go env GOARCH)}" APP_NAME=victoria-traces make app-local-pure
+
+FROM scratch
 COPY --from=build /health-probe /health-probe
+COPY --from=upstream-build /src/bin/victoria-traces-pure /victoria-traces-prod
+ENTRYPOINT ["/victoria-traces-prod"]
 HEALTHCHECK --interval=5s --timeout=3s --retries=20 CMD ["/health-probe","-url","http://127.0.0.1:10428/health"]

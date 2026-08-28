@@ -12,7 +12,7 @@ test("happy path: process an order then checkout", async ({ page }) => {
   await expect(page.locator("#out")).toContainText("→ 200", { timeout: 5000 });
 
   await page.getByRole("button", { name: "Checkout" }).click();
-  await expect(page.locator("#out")).toContainText("→", { timeout: 5000 });
+  await expect(page.locator("#out")).toContainText("→ 200", { timeout: 5000 });
 });
 
 test("error path: forced failure surfaces a 500", async ({ page }) => {

@@ -36,12 +36,17 @@ assert_runtime_images(){
   sed "s/\${AGENTOTEL_RUNTIME_VERSION:-dev}/$version/g" "$compose_file" >"$rendered"
   grep -Fq "image: dev-observability/gateway:$version" "$rendered"
   grep -Fq "image: dev-observability/app:$version" "$rendered"
-  grep -Fq "image: dev-observability/grafana:$version" "$rendered"
+  grep -Fq "image: dev-observability/dashboard:$version" "$rendered"
+  test "$(grep -Fc 'image: dev-observability/dashboard:' "$rendered")" -eq 1
+  if grep -Eqi 'image: dev-observability/(grafana|dashboard-lite):' "$rendered"; then
+    echo "retired dashboard image remains in $compose_file" >&2
+    exit 1
+  fi
   grep -Fq "image: dev-observability/victorialogs:v1.52.0-health-$version" "$rendered"
-  grep -Fq "image: dev-observability/victoriametrics:v1.149.0-health-$version" "$rendered"
-  grep -Fq "image: dev-observability/victoriatraces:v0.10.0-health-$version" "$rendered"
-  grep -Fq "image: dev-observability/otel-collector:v0.158.0-health-$version" "$rendered"
-  if grep -Eq 'image: dev-observability/(app|gateway|grafana):dev' "$rendered"; then
+  grep -Fq "image: dev-observability/victoriametrics:v1.150.0-health-$version" "$rendered"
+  grep -Fq "image: dev-observability/victoriatraces:v0.11.0-health-$version" "$rendered"
+  grep -Fq "image: dev-observability/otel-collector:v0.159.0-health-$version" "$rendered"
+  if grep -Eq 'image: dev-observability/(app|dashboard|gateway):dev' "$rendered"; then
     echo "locally built image is not runtime-specific: $compose_file" >&2
     exit 1
   fi

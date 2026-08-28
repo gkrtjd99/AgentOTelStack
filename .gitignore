@@ -82,10 +82,13 @@ env/
 # Trivy vulnerability database and filesystem analysis cache
 .trivy-cache/
 
-# CI-generated reports (security waivers remain tracked under security/)
+# CI-generated reports (no vulnerability waivers; reports stay untracked)
 /artifacts/
+/dist/
 
 # Go build/test output. Keep *.go, go.mod, go.sum, and tests visible.
+# Dashboard builds to this local artifact path; it is never a source asset.
+src/dashboard/dashboard
 src/gateway/bin/
 src/mcp/bin/
 src/backend-health/bin/

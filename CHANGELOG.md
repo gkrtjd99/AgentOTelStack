@@ -8,6 +8,12 @@
   `src/` service ownership, and `.agentotel/` project metadata consistent.
 - The release pipeline now validates strict core SemVer, package and lockfile
   versions, changelog structure, and release-tag context before publication.
+- Added the opt-in Go Dashboard as the sole browser UI, with a dedicated
+  Gateway-shared network, pinned scratch runtime, bounded projections, and
+  separate ephemeral browser client and server-side Gateway query credentials.
+- Dashboard startup now prints a one-time fragment bootstrap URL, while
+  `make dashboard-down` stops only the Dashboard service and preserves the core
+  telemetry stack.
 
 ## 2.0.1 — 2026-08-13
 
@@ -50,13 +56,14 @@
 
 ### Security and supply chain
 
-- Grafana includes the pinned VictoriaLogs datasource plugin v0.31.0 with the
-  exact SHA-256 checksum
+- Historical v2.0.0 Grafana packaging used the pinned VictoriaLogs datasource
+  plugin v0.31.0 with SHA-256 checksum
   `6b6d7b27354ad972946318aac2a54f04363375e7cd5d1cad9d3bb74d00eb970b`.
-  Local authentication is enabled.
-- Narrow upstream Grafana CVE waivers are tracked in
-  [`security/grafana-trivy-waivers.json`](security/grafana-trivy-waivers.json)
-  and expire 2026-09-11.
+  Those assets are preserved only in the immutable historical source snapshot;
+  they are not part of the active v2.1.0 runtime.
+- Historical v2.0.0 vulnerability-waiver context is preserved at the immutable
+  [`21166ba5ad9d1aa751880c1e351e411c5cffc173` source snapshot](https://github.com/gkrtjd99/AgentOTelStack/tree/21166ba5ad9d1aa751880c1e351e411c5cffc173).
+  No waiver is active for v2.1.0.
 
 ### Validation
 
@@ -84,7 +91,7 @@ pre-assert that outcome.
 - `project.id` is provenance/filter metadata, not an authentication boundary;
   a same-user process with local credentials or Docker access can read or alter
   the stack.
-- Legacy volume migration is intentionally manual. Grafana is optional.
+- Legacy volume migration is intentionally manual. The former Grafana packaging is historical only; Grafana is not an active service or supported runtime component.
 - README verification figures are historical and are not current v2.0.0
   runtime evidence.
 
@@ -93,10 +100,10 @@ pre-assert that outcome.
 인증 Gateway(4318 ingest/17777 query), `make install VERSION=2.0.0` 기반
 버전 설치·롤백, 세 개의 읽기 전용 MCP 도구, 안전한 storage/reset 및 수동
 migration 보호를 도입했습니다. VictoriaLogs plugin v0.31.0은 지정된 SHA-256
-checksum으로 고정되며 Grafana CVE waiver는 2026-09-11에 만료됩니다.
-로컬 CI-equivalent gate 전체를 통과했고 Gateway/MCP 포맷·테스트·race,
+checksum으로 고정되던 당시 기록이며, Grafana CVE waiver는 2026-09-11에 만료됩니다.
+현재 runtime에는 Grafana 서비스나 waiver가 없습니다. 로컬 CI-equivalent gate 전체를 통과했고 Gateway/MCP 포맷·테스트·race,
 project/credential 및 atomic install/symlink 검증, 전체 이력·소스 Gitleaks,
-app/Gateway Trivy HIGH/CRITICAL 0건, Grafana waiver, amd64/arm64 backend health,
+app/Gateway Trivy HIGH/CRITICAL 0건, 과거 Grafana waiver 기록, amd64/arm64 backend health,
 인증과 `error=true`를 포함한 3-backend correlation 및 VictoriaLogs 장애·복구를
 확인했습니다. 이전 hosted push는 실패했으며 이 수정이 이를 보완합니다. PR #1의
 GitHub-hosted CI/supply-chain checks가 publication gate이고 최종 상태는 PR checks에

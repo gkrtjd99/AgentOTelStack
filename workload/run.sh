@@ -28,4 +28,4 @@ while [ "$total" -gt 0 ]; do
   sleep 0.05
   total=$((total - 1))
 done
-echo "→ done. Query it: ./obs/metrics.sh 'sum by (outcome) (orders_processed_total)'"
+echo "→ done. Query it: ./bin/obs credentials run -- ./obs/metrics.sh sample-app 15m"

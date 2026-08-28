@@ -2,6 +2,9 @@
 set -eu
 # shellcheck source=common.sh
 . "$(dirname "$0")/common.sh"
+# Scrub retired Grafana variables before any ensure/help/Docker path can copy or
+# inspect the inherited environment.
+scrub_retired_grafana_env
 usage(){
   cat >&2 <<'EOF'
 usage: obs compose <docker compose arguments>
@@ -16,21 +19,82 @@ command -v docker >/dev/null 2>&1 || die 'docker is unavailable'
 . "$(dirname "$0")/common.sh"
 load_compose_credentials
 
-# The bundled app is the only Compose workload that carries project
-# provenance.  Resolve it at invocation time so a checkout rekey is reflected
-# immediately, and never silently fall back to a shared/stale identity.  An
-# explicit value is useful for a deliberately controlled non-Git invocation,
-# but is held to the same UUIDv4 contract.
+# The bundled app and dashboard are the only Compose workloads that carry
+# project provenance. Resolve it at invocation time so a checkout rekey is
+# reflected immediately, and never silently fall back to a shared/stale
+# identity. An explicit value is useful for a deliberately controlled
+# non-Git invocation, but is held to the same UUIDv4 contract.
 needs_demo_project=0
-profile_arg=0
-for arg in "$@"; do
-  case "$arg" in
-    --profile) profile_arg=1; continue ;;
-    --profile=demo|app) needs_demo_project=1 ;;
+mark_project_profile(){
+  case "$1" in
+    demo|app|dashboard) needs_demo_project=1 ;;
   esac
-  if [ "$profile_arg" -eq 1 ]; then
-    [ "$arg" = demo ] && needs_demo_project=1
-    profile_arg=0
+}
+mark_profile_list(){
+  profile_list=$1
+  old_ifs=$IFS
+  IFS=,
+  # shellcheck disable=SC2086
+  for profile in $profile_list; do
+    profile=$(printf '%s' "$profile" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+    mark_project_profile "$profile"
+  done
+  IFS=$old_ifs
+}
+mark_profile_list "${COMPOSE_PROFILES:-}"
+# Bounded Compose argument scan. Values belonging to global options are never
+# service selectors. Profiles are special: both separate and `=` forms are
+# inspected, while app/dashboard are inspected only after a Compose command.
+compose_skip=0
+compose_skip_kind=''
+compose_subcommand=0
+for arg in "$@"; do
+  if [ "$compose_skip" -eq 1 ]; then
+    if [ "$compose_skip_kind" = profile ]; then mark_profile_list "$arg"; fi
+    compose_skip=0
+    compose_skip_kind=''
+    continue
+  fi
+  case "$arg" in
+    --profile)
+      compose_skip=1
+      compose_skip_kind=profile
+      continue
+      ;;
+    --profile=*)
+      mark_profile_list "${arg#--profile=}"
+      continue
+      ;;
+    --env-file|-f|--file|-p|--project-name|--project-directory|--context|--log-level|--progress|--parallel|--ansi|--host|--tls-cacert|--tlscacert|--tlscert|--tlskey)
+      compose_skip=1
+      continue
+      ;;
+    --env-file=*|-f=*|--file=*|-p=*|--project-name=*|--project-directory=*|--context=*|--log-level=*|--progress=*|--parallel=*|--ansi=*|--host=*|--tls-cacert=*|--tlscacert=*|--tlscert=*|--tlskey=*)
+      continue
+      ;;
+    # Boolean global options do not consume the next argument.
+    --all-resources|--compatibility|--dry-run|--help|--no-ansi|--skip-hostname-check|--tls|--verbose)
+      continue
+      ;;
+    --)
+      compose_subcommand=1
+      continue
+      ;;
+  esac
+  if [ "$compose_subcommand" -eq 0 ]; then
+    case "$arg" in
+      build|config|cp|create|down|events|exec|images|kill|logs|pause|port|ps|pull|push|restart|rm|run|start|stats|stop|top|unpause|up|version|wait|watch)
+        compose_subcommand=1
+        ;;
+      -*)
+        # Unknown global options are left to Docker Compose. They cannot make a
+        # pre-command app/dashboard token a service selector.
+        ;;
+    esac
+  else
+    case "$arg" in
+      app|dashboard) mark_project_profile "$arg" ;;
+    esac
   fi
 done
 if [ "$needs_demo_project" -eq 1 ]; then

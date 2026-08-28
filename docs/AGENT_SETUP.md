@@ -1,106 +1,113 @@
 # Agent setup
 
-This document is for installing the runtime for an agent or human on a machine.
-The installed launcher is self-contained and versioned; it does not require the
-source repository to remain checked out.
+[English](./AGENT_SETUP.md) · [한국어](./ko/AGENT_SETUP.md)
 
-## Install and start
+This document covers installation of the clone-independent runtime. For
+checkout development, use [`DEVELOPMENT.md`](./DEVELOPMENT.md); for operation
+after setup, use [`OPERATIONS.md`](./OPERATIONS.md).
 
-### Stable release (2.1.0)
+## Install an immutable release
 
-Use the immutable GitHub release assets for a reproducible installation. Fetch
-the checksum first, then the tarball, verify it before extraction, and install
-from the verified source tree:
+A release is a versioned source bundle and a paired SHA-256 asset. Download the
+checksum and archive for the same immutable tag, verify the archive before
+extracting it, then install from the verified tree. The current release version
+is `2.1.0`:
 
 ```bash
 VERSION=2.1.0
 BASE="https://github.com/gkrtjd99/AgentOTelStack/releases/download/v${VERSION}"
 curl -fLO "${BASE}/AgentOTelStack-v${VERSION}.tar.gz.sha256"
 curl -fLO "${BASE}/AgentOTelStack-v${VERSION}.tar.gz"
-sha256sum --check "AgentOTelStack-v${VERSION}.tar.gz.sha256"
+if command -v sha256sum >/dev/null 2>&1; then
+  sha256sum --check "AgentOTelStack-v${VERSION}.tar.gz.sha256"
+else
+  shasum -a 256 -c "AgentOTelStack-v${VERSION}.tar.gz.sha256"
+fi
 tar -xzf "AgentOTelStack-v${VERSION}.tar.gz"
 cd "AgentOTelStack-v${VERSION}"
 make install VERSION="${VERSION}"
 ```
 
-The `v2.1.0` tag and its assets are immutable: do not replace an asset or
-silently reuse a tag. A changed checksum is a different release and should be
-investigated before installation. The checksum detects corruption and confirms
-the tarball matches the paired release asset; trust the GitHub tag/release (or
-an independently verified mirror) for provenance.
+`sha256sum --check` is the usual Linux command; `shasum -a 256 -c` is the
+portable macOS alternative. A successful checksum proves that the downloaded
+archive matches the paired checksum asset. The release tag and hosting
+repository remain the provenance boundary; a checksum copied from an untrusted
+mirror is not an authenticity proof by itself.
 
-For source development, clone the repository (or check out an immutable tag)
-and run the checkout launcher with `AGENTOTEL_DEV_MODE=1`. A source checkout
-is intentionally different from the clone-independent release runtime. Before
-upgrading either one, copy `.agentotel/project.toml` to a safe location and
-restore it after the upgrade when the existing telemetry identity must survive.
+The installer places the selected version below
+`${XDG_DATA_HOME:-$HOME/.local/share}/agentotel/`, maintains `current` and
+`previous` pointers, and installs the global launcher at
+`${XDG_BIN_HOME:-$HOME/.local/bin}/obs`. It copies the runtime assets required by
+that launcher, not the checkout's root `Makefile`, ordinary `scripts/`, or
+`docs/` as installed operational dependencies. The checkout can therefore be
+moved or removed after installation.
 
-From a clone, run:
+MCP is built by default during installation and requires Docker. Use
+`make install WITHOUT_MCP=1 VERSION="${VERSION}"` only when the read-only MCP
+adapter is deliberately not wanted. The installed binary, when present, is
+`${XDG_DATA_HOME:-$HOME/.local/share}/agentotel/current/bin/agentotel-mcp`.
+
+## First setup
+
+Run the global launcher from any directory:
 
 ```bash
-make install VERSION=2.1.0
 obs setup
 obs up
 obs doctor
 ```
 
-`make install` creates a 0600 credential store containing distinct Gateway
-ingest/query tokens and the Grafana admin password. A source checkout that has
-not been installed can initialize the same store with
-`./bin/obs credentials ensure` (or `obs setup` does this automatically).
-Compose targets load those values in-process; secrets are not printed or
-written to a repository `.env` file. Existing `GATEWAY_*`/`GF_*` environment
-values remain supported as explicit operator overrides.
+`obs setup` creates the local credential store and the four active, labeled
+telemetry volumes. The canonical credential file is
+`${XDG_CONFIG_HOME:-$HOME/.config}/agentotel/credentials`; it is a regular 0600
+file containing exactly the distinct `ingest_token` and `query_token` keys.
+Compose receives those roles only in the child process. Do not put either token
+in source control or a repository `.env` file.
 
-Project metadata is generated locally in `.agentotel/` and is ignored by Git.
-The local `.agentotel/project.toml` supplies the checkout's telemetry identity;
-it is not a shared source artifact. The release checksum protects the downloaded
-asset, while this local file preserves identity independently of the release
-version. Before upgrading an existing checkout, copy that file somewhere safe
-if you need to preserve the same identity, then restore it into the new
-checkout's `.agentotel/` directory.
+The stack's workspace project is separate from its Docker stack identity. A
+checkout's `.agentotel/project.toml` contains the local UUIDv4 telemetry scope
+and is ignored by Git; `obs project ensure` creates or validates it. Preserve
+that file separately when replacing a checkout if its telemetry identity must
+survive. The stack UUID is stored under
+`${XDG_STATE_HOME:-$HOME/.local/state}/agentotel/stack.uuid` and controls volume
+labels; it is not replaced by `AGENTOTEL_PROJECT_ID`.
 
-`obs setup` creates and labels the exact persistent volumes. `obs up` starts
-the shared six-service runtime: Gateway, collector, queue initializer, and
-the three Victoria backends (the sample app is off). For a checkout demo, run
-`AGENTOTEL_DEV_MODE=1 ./bin/obs compose --profile demo up -d --build`.
+After the core runtime is up, connect an app with
+`obs run --service NAME -- COMMAND`, or see [`CONNECT.md`](./CONNECT.md). The
+bundled sample app is off in the default runtime; a checkout demo uses the
+explicit source path described in [`DEVELOPMENT.md`](./DEVELOPMENT.md).
 
-The launcher and runtime are installed under the XDG agentotel directories and
-can be invoked from another directory. Query credentials are read from the
-agentotel credential store; keep ingest/query tokens and the Grafana password
-out of source control. Query helpers can be run from any checkout with
-`./bin/obs credentials run -- ./obs/context.sh my-app`.
-See [`CONNECT.md`](./CONNECT.md) for app configuration and MCP setup.
+## MCP scope
 
-The installed MCP command is `${XDG_DATA_HOME:-$HOME/.local/share}/agentotel/current/bin/agentotel-mcp`.
-It is built for the host OS and architecture and remains usable if this clone is
-moved or deleted. Docker is required during installation to build it; use
-`make install WITHOUT_MCP=1` only when the MCP capability is intentionally not
-wanted.
-Launch MCP with the workspace project as its current directory (or provide a
-validated `AGENTOTEL_PROJECT_ID` from the workspace launcher). Its three tools
-always query that project and do not accept an arbitrary project argument.
+The installed MCP adapter is read-only and exposes exactly three tools:
+`agentotel_context`, `agentotel_correlate`, and `agentotel_services`. It uses the
+Gateway query credential and the project resolved from its workspace. It does
+not accept an arbitrary project, backend URL, raw query, command, or telemetry
+write. Keep its configuration pointer and credential store private. See
+[`CONNECT.md`](./CONNECT.md) for a minimal stdio configuration and
+[`SECURITY.md`](./SECURITY.md) for the trust boundary.
 
-## Maintenance and safety
+## Source checkouts are different
+
+A source checkout deliberately does not override an installed runtime through a
+bare `./bin/obs` invocation. Use the explicit source prefix:
 
 ```bash
-obs doctor
-obs down        # stop, preserve telemetry
-obs migrate volumes --confirm # legacy volume: prints manual backup/copy/verify flow
-obs reset --all --confirm     # destructive, interactive UUID/project/volume guard
+make dev-setup
+make demo
+# or, for a single source command:
+AGENTOTEL_DEV_MODE=1 ./bin/obs setup
+AGENTOTEL_DEV_MODE=1 ./bin/obs up
 ```
 
-`obs storage --json` is a read-only storage and cardinality check. It reports
-exact filesystem bytes, retention/disk caps, and bounded 15-minute Gateway
-projections for ingest rate, active metric series, log-stream churn, and trace
-service/span-name churn. Results are capped at 500 records and preserve
-`no_data` versus `backend_unavailable`; they never expose raw backend queries
-or fabricate zeroes. Keep run/commit/instance/raw IDs out of metric labels and
-log streams (the low-cardinality policy).
+Do not copy a mutable branch archive into a production-style install. Use a
+verified release asset for clone-independent operation and an explicit checkout
+for development.
 
-The read-only MCP adapter exposes exactly three tools:
-`agentotel_context`, `agentotel_correlate`, and `agentotel_services`.
+## Next references
 
-If `doctor` reports `migration_required`, do not delete or auto-convert the
-legacy volume. Back it up and follow the manual migration instructions printed
-by `obs migrate volumes --confirm`, then verify before switching the runtime.
+- [`OPERATIONS.md`](./OPERATIONS.md) — lifecycle, storage, credentials, and
+  legacy-volume handling
+- [`QUERY.md`](./QUERY.md) — authenticated bounded reads
+- [`SECURITY.md`](./SECURITY.md) — credentials, project identity, and local
+  threat model

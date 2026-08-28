@@ -5,6 +5,20 @@ ARG TARGETARCH
 WORKDIR /src
 COPY health.go .
 RUN set -eu; echo "native builder=${BUILDPLATFORM} target=${TARGETOS}/${TARGETARCH}"; GOOS="${TARGETOS:-$(go env GOOS)}" GOARCH="${TARGETARCH:-$(go env GOARCH)}" CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o /health-probe health.go
-FROM victoriametrics/victoria-logs:v1.52.0@sha256:47b820890d64c4575a2a0a46415dcd8a4fd59a0f1fcd6a377693d7aea639442e
+
+# Rebuild the upstream binary with the patched Go toolchain. The published
+# VictoriaLogs image embeds a vulnerable Go stdlib, so retaining it as the
+# runtime base would fail the non-waived HIGH/CRITICAL image gate.
+FROM --platform=$BUILDPLATFORM golang:1.26.6-bookworm@sha256:116d58cbd88c1297624acc6e967a060012422bacf9930927e23fb719189c6f36 AS upstream-build
+ARG TARGETOS
+ARG TARGETARCH
+WORKDIR /src
+RUN git clone --depth 1 --branch v1.52.0 https://github.com/VictoriaMetrics/VictoriaLogs.git . \
+ && test "$(git rev-parse HEAD)" = 46a54c976fa3d404396050e8a5ee6c5b0320efc5 \
+ && CGO_ENABLED=0 GOOS="${TARGETOS:-$(go env GOOS)}" GOARCH="${TARGETARCH:-$(go env GOARCH)}" APP_NAME=victoria-logs make app-local-pure
+
+FROM scratch
 COPY --from=build /health-probe /health-probe
+COPY --from=upstream-build /src/bin/victoria-logs-pure /victoria-logs-prod
+ENTRYPOINT ["/victoria-logs-prod"]
 HEALTHCHECK --interval=5s --timeout=3s --retries=20 CMD ["/health-probe","-url","http://127.0.0.1:9428/health"]

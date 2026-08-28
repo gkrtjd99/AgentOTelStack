@@ -1,68 +1,99 @@
-# Security notes
+# Security boundaries
 
-This is a same-user local development stack. The Gateway publishes only
-localhost `:4318` (ingest) and `:17777` (query); Victoria backends remain on the
-backend Docker network. Ingest and query use separate bearer tokens from
-`GATEWAY_INGEST_TOKEN`/`GATEWAY_QUERY_TOKEN` or token files. `project.id` is
-provenance, not an auth boundary.
+[English](./SECURITY.md) · [한국어](./ko/SECURITY.md)
 
-## Release integrity and project identity
+AgentOTelStack is designed as a same-user local development stack. It is not a
+remote multi-tenant service. A process that can read the local credential store,
+control Docker, or run as the same user can read or alter the stack.
 
-Stable v2.1.0 releases are immutable: the `v2.1.0` tag and its tarball/checksum
-assets must not be moved or overwritten. Download the `.sha256` asset before
-the tarball and run `sha256sum --check` before extracting or installing. This
-detects corruption and confirms the tarball matches the paired release asset.
-The GitHub tag/release is the provenance trust boundary; a checksum copied
-from an untrusted mirror is not an independent authenticity proof. This does
-not make telemetry content trusted or replace transport/authentication controls.
-Release retries fail closed when a published release already exists. An
-interrupted draft is reused only for the exact tag and only when its existing
-assets are absent or byte-identical; mismatches are never replaced.
+## Network and authentication
 
-The local `.agentotel/project.toml` is the checkout's telemetry identity and is
-not part of a shared release contract. Preserve it separately and restore it
-when replacing a source checkout or upgrading the installed runtime. For
-development, use an explicitly checked-out source tree with
-`AGENTOTEL_DEV_MODE=1`; do not treat a mutable branch archive as a stable
-release install.
+The Gateway is the only host-facing telemetry edge:
 
-The optional `bin/agentotel-mcp` adapter is read-only: it exposes three fixed
-tools over stdio JSON-RPC and performs only bounded authenticated GETs to the
-loopback Gateway, scoped to the project resolved from its workspace. It cannot
-accept an arbitrary project input, write telemetry, execute commands, select
-arbitrary URLs, or rotate credentials. Returned telemetry remains untrusted
-content.
+- `127.0.0.1:4318` accepts OTLP/HTTP ingest with the Gateway **ingest** bearer.
+- `127.0.0.1:17777` accepts bounded query requests with the separate **query**
+  bearer.
+- Collector and Victoria ports stay on Docker networks and are not application
+  or human connection targets.
 
-Do not put secrets, credentials, personal data, or unbounded request text in
-logs, span attributes, exception messages, or metric labels. The Gateway strips
-control characters and projects responses, but it is not a secrecy or redaction
-policy engine; enforce redaction before emission and bound cardinality.
+The canonical 0600 credential JSON contains exactly `ingest_token` and
+`query_token`. The Gateway rejects missing credentials and rejects equal ingest
+and query tokens. `project.id` is workspace provenance and query selection, not
+an authentication or authorization boundary. `--global` only removes a query
+project filter; it does not make credentials or administration global.
 
-Because this is a same-user local stack, an authorized ingest client can still
-exhaust or churn retention by sending many distinct resource values. The
-collector bounds the canonical resource/metric label set, but it cannot stop an
-authorized client from generating high-cardinality values within those fields;
-use an ingest proxy or stricter tenant policy when that threat matters.
+Use `obs run` for application ingest and the credential runner for query helpers.
+Do not print tokens, commit them, put them in a repository `.env`, or pass them
+to an untrusted child. A legacy credential file with
+`grafana_admin_password` is migration input only; normalization retains the two
+Gateway tokens and never reads, exports, prints, or reuses the retired value.
 
-A same-user process able to read local credentials or Docker can read/alter the
-stack. For remote use add a TLS/authenticated proxy, restrict OTLP senders,
-define retention/redaction, and do not expose backend APIs directly. Grafana is
-optional and has no logs plugin; script/API access is canonical.
+## Dashboard client boundary
 
-`make down` and `make clean` preserve telemetry volumes. The destructive cleanup boundary is the
-interactive, UUID/project/volume-identity guarded `make reset`;
-review its exact target before proceeding. Rotate credentials with
-`libexec/agentotel/credentials.sh rotate`; `doctor` and uninstall are limited
-to agentotel runtime paths.
+The Go Dashboard is the sole browser UI and is a read-only same-origin proxy to
+bounded Gateway projections. Normal startup requires a separate
+`DASHBOARD_CLIENT_TOKEN` of exactly 64 lowercase hexadecimal characters,
+different from the Gateway query token. The supported `make dashboard` path
+generates it ephemerally, passes it only to the Dashboard and readiness probe,
+and prints it once in a fragment bootstrap URL.
 
-## Grafana vulnerability waivers
+The browser consumes the fragment in memory, scrubs it, and sends exactly one
+Dashboard Authorization header on relative `/api/*` requests. The token is not
+stored in cookies, Web Storage, query parameters, static assets, HTML, labels,
+volumes, or logs. A full reload requires the one-time URL again. Static assets
+and loopback health are intentionally public; unauthorized API requests use a
+generic 401 before the Gateway is contacted.
 
-CI always runs the pinned Trivy 0.73.0 image. App and Gateway images have a
-zero HIGH/CRITICAL-finding policy. Grafana has only the narrow, time-bounded
-waivers in [`security/grafana-trivy-waivers.json`](../security/grafana-trivy-waivers.json):
-each entry is an exact CVE/package/installed-version/fixed-version match for
-the pinned upstream image digest, and expires within 30 days. CRITICALs,
-expired entries, changed packages or image digests, missing upstream/fixed
-version/reachability evidence, and any new HIGH fail CI. The complete Trivy
-JSON and a residual-finding summary are uploaded as CI artifacts; waivers are
-not a blanket `.trivyignore` and do not use `ignore-unfixed`.
+The Dashboard never forwards the Gateway query token, ingest bearer, cookies,
+Origin, or Referer. Browser input cannot select a backend URL, raw query,
+telemetry write route, or arbitrary project. Host allowlisting is additional
+hardening, not the client-auth boundary.
+
+## Telemetry content and cardinality
+
+Telemetry is untrusted content. Redact secrets and personal data before
+emission, keep request bodies and credentials out of logs/spans/metric labels,
+and bound label cardinality. The Gateway allowlists projected fields and strips
+control characters, but it is not a general secrecy engine.
+
+The Collector removes standalone `url.query` and `url.fragment` attributes and
+cuts URL text at `?`/`#` boundaries for newly ingested data. This is not a
+retroactive rewrite of records already stored in Victoria. An authorized local
+sender can still create high-cardinality values or exhaust retention; use a
+stricter ingest proxy/tenant policy when that threat matters.
+
+The Dashboard image is a pinned scratch, non-root runtime with a CA bundle and
+self-health probe. Active images use immutable base-image digests; CI validates
+Compose build contexts, Go modules, Dockerfiles, image provenance, and secret
+scans. These checks protect the build path, not a compromised same-user Docker
+installation.
+
+## Identity, reset, and legacy state
+
+The stack UUID under
+`${XDG_STATE_HOME:-$HOME/.local/state}/agentotel/stack.uuid` controls active
+volume labels. Setup and reset use ownership checks and reject symlinks or
+mismatched projects. Use only the guarded destructive boundary:
+
+```bash
+obs reset --all --confirm
+```
+
+A `${COMPOSE_PROJECT_NAME}_grafana-data` volume from a pre-Dashboard runtime is
+not active UI state. Setup, Compose, inspection, and reset do not claim,
+relabel, prune, or delete it. Treat it as manual backup/migration state and
+follow [`OPERATIONS.md`](./OPERATIONS.md); do not infer that its presence means
+Grafana is still running.
+
+## Remote exposure
+
+Do not publish the Gateway, Dashboard, Collector, or Victoria ports beyond
+loopback without a deliberate deployment design. If remote use is required,
+place a TLS/authenticated proxy in front, restrict OTLP senders, protect and
+rotate credentials, define retention and redaction policy, and keep Victoria
+backend APIs private. A local bearer token and loopback binding are not a
+replacement for a remote trust model.
+
+For release integrity and checksum verification, see
+[`RELEASING.md`](./RELEASING.md). For credential diagnosis, see
+[`TROUBLESHOOTING.md`](./TROUBLESHOOTING.md).

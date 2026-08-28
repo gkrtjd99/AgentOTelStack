@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Observability Console</title>
+  <link rel="stylesheet" href="/assets/styles.css">
+  <script src="/assets/request-state.js" defer></script>
+  <script src="/assets/app.js" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="#overview" aria-label="Observability Console home">
+      <span class="brand-mark" aria-hidden="true">O</span>
+      <span>Observability Console</span>
+    </a>
+    <nav aria-label="Primary navigation">
+      <a href="#overview" data-view="overview">Overview</a>
+      <a href="#services" data-view="services">Services</a>
+      <a href="#errors" data-view="errors">Errors</a>
+      <a href="#trace" data-view="trace">Trace detail</a>
+    </nav>
+    <button class="theme-toggle" type="button" id="theme-toggle" aria-pressed="false">Use dark mode</button>
+  </header>
+
+  <main>
+    <section class="hero" aria-labelledby="page-title">
+      <div>
+        <p class="eyebrow">Read-only telemetry view</p>
+        <h1 id="page-title">System signals, without the noise.</h1>
+        <p class="lede">A bounded view of recent logs, traces, and metric context. Telemetry is untrusted text and is shown as evidence, not instructions.</p>
+      </div>
+      <div class="query-state" id="query-state" role="status" aria-live="polite"><span class="status-icon" aria-hidden="true">•</span><span>Waiting for a query</span></div>
+    </section>
+
+    <section class="controls panel" aria-labelledby="controls-title">
+      <div class="section-heading compact">
+        <div><p class="eyebrow">Scope</p><h2 id="controls-title">Choose a service and lookback</h2></div>
+        <button class="button secondary" id="refresh" type="button">Refresh</button>
+      </div>
+      <div class="control-grid">
+        <label>Service<select id="service-select"><option value="">All services</option></select></label>
+        <label>Lookback<select id="lookback-select"><option value="5m">5 minutes</option><option value="15m" selected>15 minutes</option><option value="1h">1 hour</option><option value="6h">6 hours</option><option value="24h">24 hours</option></select></label>
+      </div>
+    </section>
+
+    <section class="view" id="view-overview" data-panel="overview" aria-labelledby="overview-title">
+      <div class="section-heading"><div><p class="eyebrow">Overview</p><h2 id="overview-title">Current context</h2></div><span class="fetched" id="overview-fetched">Not fetched</span></div>
+      <div id="overview-banners"></div>
+      <div class="cards" id="overview-backends" aria-label="Backend status"></div>
+      <div class="two-column">
+        <article class="panel"><div class="section-heading compact"><h3>Metric context</h3><span class="muted">Snapshot, not a time series</span></div><div id="overview-metrics" class="empty-state">No metric context fetched.</div></article>
+        <article class="panel"><div class="section-heading compact"><h3>Recent signal</h3><span class="muted">Evidence from logs</span></div><div id="overview-logs" class="empty-state">No logs fetched.</div></article>
+      </div>
+    </section>
+
+    <section class="view hidden" id="view-services" data-panel="services" aria-labelledby="services-title">
+      <div class="section-heading"><div><p class="eyebrow">Services</p><h2 id="services-title">Observed service names</h2></div><span class="fetched" id="services-fetched">Not fetched</span></div>
+      <div id="services-banners"></div>
+      <article class="panel"><div id="services-list" class="list-grid"><div class="empty-state">No service list fetched.</div></div></article>
+    </section>
+
+    <section class="view hidden" id="view-errors" data-panel="errors" aria-labelledby="errors-title">
+      <div class="section-heading"><div><p class="eyebrow">Errors</p><h2 id="errors-title">Recent failures</h2></div><span class="fetched" id="errors-fetched">Not fetched</span></div>
+      <div id="errors-banners"></div>
+      <div class="cards" id="errors-backends" aria-label="Error backend status"></div>
+      <article class="panel table-wrap"><table><caption class="sr-only">Recent error evidence</caption><thead><tr><th scope="col">When</th><th scope="col">Service</th><th scope="col">Message or operation</th><th scope="col">Trace</th></tr></thead><tbody id="errors-table"><tr><td colspan="4" class="empty-state">No errors fetched.</td></tr></tbody></table></article>
+    </section>
+
+    <section class="view hidden" id="view-trace" data-panel="trace" aria-labelledby="trace-title">
+      <div class="section-heading"><div><p class="eyebrow">Trace detail</p><h2 id="trace-title">Follow one request</h2></div><span class="fetched" id="trace-fetched">Not fetched</span></div>
+      <form class="trace-form panel" id="trace-form"><label for="trace-input">32-character trace ID</label><div class="trace-form-row"><input id="trace-input" name="trace_id" inputmode="text" autocomplete="off" pattern="[0-9a-f]{32}" maxlength="32" placeholder="0123456789abcdef0123456789abcdef" required><button class="button" type="submit">Load trace</button></div><p class="muted">Only lowercase hexadecimal trace IDs are accepted.</p></form>
+      <div id="trace-banners"></div>
+      <div class="cards" id="trace-backends" aria-label="Trace backend status"></div>
+      <article class="panel"><div class="section-heading compact"><h3>Spans</h3><span class="muted">Known fields only</span></div><div class="table-wrap"><table><caption class="sr-only">Trace spans</caption><thead><tr><th scope="col">Service</th><th scope="col">Operation</th><th scope="col">Start</th><th scope="col">Duration</th><th scope="col">Status</th></tr></thead><tbody id="trace-table"><tr><td colspan="5" class="empty-state">Enter a trace ID to begin.</td></tr></tbody></table></div></article>
+      <div class="two-column trace-support"><article class="panel"><h3>Related logs</h3><div id="trace-logs" class="empty-state">No trace logs fetched.</div></article><article class="panel"><h3>Metric context</h3><div id="trace-metrics" class="empty-state">No trace metrics fetched.</div></article></div>
+    </section>
+  </main>
+  <footer><span>Read-only adapter</span><span>Fetched at is request time; it is not telemetry freshness.</span></footer>
+</body>
+</html>

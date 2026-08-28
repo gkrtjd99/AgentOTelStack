@@ -4,7 +4,57 @@
 cmd=${1:-}; shift || :
 case "$cmd" in
  version) printf '{"version":"%s","schema":1}\n' "$VERSION";;
- stack-id) mkdirs; f="$STATE/stack.uuid"; if [ -f "$f" ]; then uuid=$(cat "$f"); else uuid=$(rand_uuid | tr A-F a-f); valid_uuid "$uuid" || die 'generated invalid stack UUID'; printf '%s\n' "$uuid" >"$f"; chmod 600 "$f"; fi; valid_uuid "$uuid" || die 'invalid stack UUID'; printf '%s\n' "$uuid";;
+ stack-id)
+  mkdirs
+  f="$STATE/stack.uuid"
+  [ ! -L "$f" ] || die 'symlink rejected: stack identity'
+  lock="$f.lock"
+  lock_acquire "$lock" 'stack identity' 1000
+  stack_lock_token=$AGENTOTEL_LOCK_TOKEN
+  unlock_stack(){ lock_release "$lock" "$stack_lock_token" >/dev/null 2>&1 || :; trap - EXIT HUP INT TERM; }
+  trap unlock_stack EXIT
+  trap 'unlock_stack; exit 1' HUP INT TERM
+  # Re-check after taking the lock: a competing resolver may have persisted
+  # the winner while this process was waiting. Never re-key that identity.
+  [ ! -L "$f" ] || die 'symlink rejected: stack identity'
+  requested="${AGENTOTEL_STACK_UUID:-}"
+  if [ -n "$requested" ]; then
+    case "$requested" in *[!0-9A-Fa-f-]*) die 'invalid AGENTOTEL_STACK_UUID';; esac
+    requested=$(printf '%s' "$requested" | tr 'A-F' 'a-f')
+    valid_uuid "$requested" || die 'invalid AGENTOTEL_STACK_UUID'
+  fi
+  read_persisted_stack_uuid(){
+    [ ! -L "$f" ] || die 'symlink rejected: stack identity'
+    [ -f "$f" ] || die 'stack identity is not a regular file'
+    uuid=$(awk 'NR == 1 { value = $0; next } { invalid = 1 } END { if (NR != 1 || invalid) exit 1; print value }' "$f") || die 'invalid stack UUID'
+    valid_uuid "$uuid" || die 'invalid stack UUID'
+  }
+  if [ -e "$f" ] || [ -L "$f" ]; then
+    read_persisted_stack_uuid
+    if [ -n "$requested" ] && [ "$requested" != "$uuid" ]; then
+      die 'AGENTOTEL_STACK_UUID does not match persisted stack UUID'
+    fi
+  else
+    uuid="${requested:-$(rand_uuid | tr A-F a-f)}"
+    valid_uuid "$uuid" || die 'generated invalid stack UUID'
+    tmp="$f.tmp.$$"
+    (umask 077; set -C; printf '%s\n' "$uuid" >"$tmp") || die 'unable to persist stack UUID'
+    chmod 600 "$tmp"
+    # ln creates the destination name exclusively and atomically. If an
+    # external resolver won despite the lock, return its persisted identity.
+    if ln "$tmp" "$f" 2>/dev/null; then
+      rm -f "$tmp"
+    else
+      rm -f "$tmp"
+      read_persisted_stack_uuid
+      if [ -n "$requested" ] && [ "$requested" != "$uuid" ]; then
+        die 'AGENTOTEL_STACK_UUID does not match persisted stack UUID'
+      fi
+    fi
+  fi
+  printf '%s\n' "$uuid"
+  unlock_stack
+  ;;
  credentials) exec "$(dirname "$0")/credentials.sh" "$@";;
  setup) exec "$(dirname "$0")/setup.sh" "$@";;
  up) exec "$(dirname "$0")/setup.sh" up "$@";;

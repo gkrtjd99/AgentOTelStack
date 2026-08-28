@@ -1,132 +1,158 @@
-# Connecting an app (bring your own app)
+# Connect an application or MCP client
 
-This stack has one host-facing write contract: send OTLP/HTTP protobuf to the
-Gateway at `http://127.0.0.1:4318`. Apps do not connect to the collector or to
-Victoria backends directly. Collector gRPC `:4317` and all backend ports
-(`:9428`, `:8428`, `:10428`) are internal-only in the current compose file.
+[English](./CONNECT.md) · [한국어](./ko/CONNECT.md)
 
-## Required environment
+AgentOTelStack is a shared backend, not a library that must be installed into
+every application. Applications send authenticated OTLP/HTTP to the Gateway;
+query tools read the resulting evidence through the Gateway. Never connect an
+application directly to the Collector or a Victoria backend.
+
+## Recommended path: `obs run`
+
+Start the installed shared runtime first, then let the launcher provide the
+application's ingest environment:
 
 ```bash
+obs setup
+obs up
+obs run --service my-app -- <application command> [args...]
+```
+
+For a source checkout, make the source choice explicit:
+
+```bash
+AGENTOTEL_DEV_MODE=1 ./bin/obs setup
+AGENTOTEL_DEV_MODE=1 ./bin/obs up
+AGENTOTEL_DEV_MODE=1 ./bin/obs run --service my-app -- <application command> [args...]
+```
+
+`obs run` loads only the ingest role from the 0600 credential store, sets
+`OTEL_SERVICE_NAME`, defaults `OTEL_EXPORTER_OTLP_ENDPOINT` to
+`http://127.0.0.1:4318`, sets `OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf`, and
+sets the URL-encoded bearer header
+`Authorization=Bearer%20<ingest-token>`. It resolves the workspace project with
+`obs project ensure` and prepends `agentotel.project.id=<UUIDv4>` to
+`OTEL_RESOURCE_ATTRIBUTES`. It removes credential variables before starting
+the child and records a bounded local process scope for `obs runs`/`obs stop`.
+Use a service name containing only letters, numbers, `.`, `_`, or `-`.
+
+The shared runtime can receive many applications. Give each one a distinct
+`OTEL_SERVICE_NAME` and keep the same workspace project when the applications
+belong to that workspace.
+
+## Manual OTLP environment
+
+Use this only when the application's launcher cannot be wrapped by `obs run`.
+Obtain the project identity from the workspace and provide the **ingest** token
+through a secret manager or protected environment. Do not reuse the query token.
+
+```bash
+PROJECT_ID="$(obs project ensure)"
 export OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4318
 export OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
 export OTEL_SERVICE_NAME=my-app
-export OTEL_RESOURCE_ATTRIBUTES=deployment.environment=dev
+export OTEL_RESOURCE_ATTRIBUTES="agentotel.project.id=${PROJECT_ID},deployment.environment=dev"
 export OTEL_EXPORTER_OTLP_HEADERS="Authorization=Bearer%20${GATEWAY_INGEST_TOKEN}"
-obs up
+<application command>
 ```
 
-The ingest token is checked by the Gateway and is never forwarded upstream.
-Query tools use the separate `GATEWAY_QUERY_TOKEN` against
-`http://127.0.0.1:17777`; `project.id` is provenance/filter metadata, not
- authentication. After `obs setup`, run an app or query helper through
-`./bin/obs credentials run -- ...` to load the 0600 store without printing
-secrets. Explicit `GATEWAY_INGEST_TOKEN` and `GATEWAY_QUERY_TOKEN` values remain
-supported for controlled operator/test overrides. Keep all credentials outside
-source control.
+The host endpoint is the Gateway's loopback ingest listener. Inside the
+Compose edge network, use `http://gateway:4318` instead. Both paths require the
+same authenticated OTLP header. The query listener is a different role at
+`http://127.0.0.1:17777`; it is not an OTLP endpoint.
 
-## Per-language setup
+`project.id` is required for normal workspace-scoped query correlation but is
+not authentication. `--global` on a query only omits the project filter; it does
+not make ingestion or stack administration global.
+
+## Language examples
+
+The following examples preserve the same Gateway, protocol, service, project,
+and authentication contract.
 
 ### Node.js / TypeScript
 
-Copy `src/app/src/otel.js` and install the OpenTelemetry packages used by that
-bootstrap, then start with `node --require ./otel.js your-entry.js`.
+Copy the repository's OTel bootstrap pattern (the bundled example is
+`src/app/src/otel.js`), install the SDK/exporter dependencies in your own app,
+and start the process with the bootstrap loaded:
+
+```bash
+node --require ./otel.js your-entry.js
+```
+
+Prefer `obs run --service my-node-app -- node --require ./otel.js your-entry.js`
+so the credentials and project attribute are supplied by the launcher.
 
 ### Python
+
+The instrumented process must receive the Gateway header and project scope; an
+endpoint alone is not sufficient:
 
 ```bash
 pip install opentelemetry-distro opentelemetry-exporter-otlp
 opentelemetry-bootstrap -a install
-OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4318 \
-OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf \
-OTEL_SERVICE_NAME=my-py-app \
-OTEL_LOGS_EXPORTER=otlp \
+PROJECT_ID="$(obs project ensure)"
+export OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4318
+export OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
+export OTEL_SERVICE_NAME=my-py-app
+export OTEL_RESOURCE_ATTRIBUTES="agentotel.project.id=${PROJECT_ID},deployment.environment=dev"
+export OTEL_EXPORTER_OTLP_HEADERS="Authorization=Bearer%20${GATEWAY_INGEST_TOKEN}"
+export OTEL_LOGS_EXPORTER=otlp
 opentelemetry-instrument python app.py
 ```
 
-### Go
-
-Use the OTLP/HTTP trace, metric, and log exporters and the same environment
-variables. Add `otelhttp`/`otelgin` middleware for HTTP spans.
+Provision `GATEWAY_INGEST_TOKEN` from the protected credential store or a secret
+manager before running this command. Do not paste the token into source.
 
 ### Java
 
 ```bash
+PROJECT_ID="$(obs project ensure)"
 java -javaagent:opentelemetry-javaagent.jar \
   -Dotel.exporter.otlp.endpoint=http://127.0.0.1:4318 \
   -Dotel.exporter.otlp.protocol=http/protobuf \
   -Dotel.exporter.otlp.headers="Authorization=Bearer%20${GATEWAY_INGEST_TOKEN}" \
-  -Dotel.service.name=my-java-app -jar your-app.jar
+  -Dotel.service.name=my-java-app \
+  -Dotel.resource.attributes="agentotel.project.id=${PROJECT_ID},deployment.environment=dev" \
+  -jar your-app.jar
 ```
 
-If an SDK cannot set the standard OTLP Authorization header, configure its
-equivalent header option; do not disable Gateway authentication.
+If an SDK names the header setting differently, configure its equivalent
+`Authorization: Bearer <ingest-token>` header. Do not disable Gateway
+authentication.
 
-## Query and troubleshooting
+### Go
 
-### MCP (read-only local adapter)
+Use the OpenTelemetry OTLP/HTTP trace, metric, and log exporters, configure the
+same endpoint/header/resource attributes, and add HTTP middleware such as
+`otelhttp` or `otelgin` where appropriate. Keep metric labels bounded and do not
+put request bodies, credentials, or high-cardinality IDs into attributes.
 
-After installation, configure Claude/Codex to launch the installed command
-`${XDG_DATA_HOME:-$HOME/.local/share}/agentotel/current/bin/agentotel-mcp` over stdio. It exposes only
-`agentotel_context`, `agentotel_correlate`, and `agentotel_services`; all calls
-are bounded authenticated GETs scoped to the project in the MCP workspace. The
-tools do not accept a caller-supplied project. Example:
+## Read-only MCP adapter
 
-```json
-{"mcpServers":{"agentotel":{"command":"/home/me/.local/share/agentotel/current/bin/agentotel-mcp"}}}
+After installation, configure the MCP client to launch:
+
+```text
+${XDG_DATA_HOME:-$HOME/.local/share}/agentotel/current/bin/agentotel-mcp
 ```
 
-The adapter reads `$XDG_CONFIG_HOME/agentotel/credentials` (0600 regular file)
-and never prints the token. Telemetry is untrusted content and must not be
-interpreted as instructions.
+over stdio. It exposes exactly `agentotel_context`, `agentotel_correlate`, and
+`agentotel_services`. Calls use the separate query credential and the project
+resolved from the MCP workspace; callers cannot provide an arbitrary project,
+backend URL, raw query, or write operation. Telemetry returned by the adapter is
+untrusted content, not instructions.
+
+## Verify the connection
+
+Use the query credential loader for reads so tokens are not printed:
 
 ```bash
-./bin/obs credentials run -- ./obs/services.sh
-./bin/obs credentials run -- ./obs/errors.sh my-app
-./bin/obs credentials run -- ./obs/context.sh my-app
-./bin/obs credentials run -- ./obs/correlate.sh <32-hex-trace-id>
+AGENTOTEL_DEV_MODE=1 ./bin/obs credentials run -- ./obs/services.sh
+AGENTOTEL_DEV_MODE=1 ./bin/obs credentials run -- ./obs/context.sh my-app 15m 50
+AGENTOTEL_DEV_MODE=1 ./bin/obs credentials run -- ./obs/logs.sh my-app 15m 20
 ```
 
-If these fail, check `obs compose ps`, `obs doctor`, and Gateway health at
-`http://127.0.0.1:17777/v1/health` using the credential runner. Allow for
-collector batching and metric export delay. Do not substitute direct Victoria
-URLs or send raw backend queries: those ports are internal by contract. The
-optional Grafana profile includes the pinned VictoriaLogs datasource plugin
-v0.31.0 baked into the image. Use the authenticated `obs` scripts or Grafana's
-provisioned datasource for logs; backend ports remain internal-only.
-
-## Lifecycle and destructive boundaries
-
-```bash
-VERSION=2.1.0
-BASE="https://github.com/gkrtjd99/AgentOTelStack/releases/download/v${VERSION}"
-curl -fLO "${BASE}/AgentOTelStack-v${VERSION}.tar.gz.sha256"
-curl -fLO "${BASE}/AgentOTelStack-v${VERSION}.tar.gz"
-sha256sum --check "AgentOTelStack-v${VERSION}.tar.gz.sha256"
-tar -xzf "AgentOTelStack-v${VERSION}.tar.gz"
-cd "AgentOTelStack-v${VERSION}"
-make install VERSION="${VERSION}" # immutable, clone-independent runtime
-./bin/obs credentials ensure # also valid for a source checkout
-obs setup
-obs up                     # shared runtime; sample app profile off
-AGENTOTEL_DEV_MODE=1 ./bin/obs compose --profile demo up -d --build app # checkout demo
-obs doctor
-obs down                   # stops services and preserves volumes
-obs reset --all --confirm  # interactive exact-volume reset (destructive)
-obs migrate volumes --confirm # manual legacy-volume migration guidance
-```
-
-The release tag and assets are immutable. Download the checksum before the
-tarball and do not install until `sha256sum --check` succeeds; never replace a
-published asset under the same tag. This check detects corruption and verifies
-the paired asset, while the GitHub tag/release remains the provenance trust
-boundary. For development, clone the source (or an
-immutable tag) and use `AGENTOTEL_DEV_MODE=1 ./bin/obs ...` so changes are read
-from that checkout. Before replacing a checkout or installing a new runtime,
-copy `.agentotel/project.toml` and restore it afterward when the existing
-telemetry identity must be preserved.
-
-The reset command requires a TTY and a typed stack UUID, validates Compose
-project/volume identity, and removes only the exact stack volumes. Runtime
-`doctor`, credential initialization/rotation, and the Compose wrapper operate
-under the XDG agentotel directories; they never print token values.
+Allow for Collector batching and metric export delay. If the service does not
+appear, follow [`TROUBLESHOOTING.md`](./TROUBLESHOOTING.md). For the complete
+installed lifecycle and credential rotation rules, see
+[`OPERATIONS.md`](./OPERATIONS.md).

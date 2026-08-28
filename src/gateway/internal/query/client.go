@@ -442,10 +442,20 @@ func processProject(v any) string {
 	return ""
 }
 func (c Client) TracesQuery(ctx context.Context, service string, limit int) (any, error) {
-	return c.TracesQueryScoped(ctx, service, "", limit)
+	return c.TracesQueryScoped(ctx, service, "", time.Time{}, time.Time{}, limit)
 }
-func (c Client) TracesQueryScoped(ctx context.Context, service, project string, limit int) (any, error) {
+
+// TracesQueryScoped searches the Jaeger-compatible trace API within the
+// supplied bounded window. Jaeger encodes start and end as Unix microseconds,
+// rather than the RFC3339 values used by VictoriaLogs.
+func (c Client) TracesQueryScoped(ctx context.Context, service, project string, start, end time.Time, limit int) (any, error) {
 	q := url.Values{"service": []string{service}, "limit": []string{strconv.Itoa(limit)}}
+	if !start.IsZero() {
+		q.Set("start", strconv.FormatInt(start.UTC().UnixMicro(), 10))
+	}
+	if !end.IsZero() {
+		q.Set("end", strconv.FormatInt(end.UTC().UnixMicro(), 10))
+	}
 	// VictoriaTraces' Jaeger API accepts a JSON object in `tags`. The live OTel
 	// storage exposes the failure marker as the Jaeger span tag error=true;
 	// project is a resource attribute and therefore needs the resource_attr:
@@ -457,7 +467,14 @@ func (c Client) TracesQueryScoped(ctx context.Context, service, project string, 
 	}
 	tagsJSON, _ := json.Marshal(tags)
 	q.Set("tags", string(tagsJSON))
-	return get(ctx, &c, c.Traces, "/select/jaeger/api/traces", q)
+	v, err := get(ctx, &c, c.Traces, "/select/jaeger/api/traces", q)
+	if err != nil {
+		return nil, err
+	}
+	if empty(v) {
+		return nil, ErrNoData
+	}
+	return v, nil
 }
 
 func empty(v any) bool {

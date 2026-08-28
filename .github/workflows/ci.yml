@@ -8,7 +8,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: MCP format
-        run: docker run --rm -v "$PWD/src/mcp:/src" -w /src golang:1.26.6-bookworm@sha256:116d58cbd88c1297624acc6e967a060012422bacf9930927e23fb719189c6f36 gofmt -d -e .
+        run: docker run --rm -v "$PWD:/repo" -w /repo/src/mcp golang:1.26.6-bookworm@sha256:116d58cbd88c1297624acc6e967a060012422bacf9930927e23fb719189c6f36 /repo/scripts/check-gofmt.sh /repo/src/mcp
       - name: MCP tests
         run: docker run --rm -v "$PWD/src/mcp:/src" -w /src golang:1.26.6-bookworm@sha256:116d58cbd88c1297624acc6e967a060012422bacf9930927e23fb719189c6f36 go test ./...
       - name: MCP race
@@ -30,19 +30,33 @@ jobs:
         run: |
           find obs libexec scripts workload tests -type f -name '*.sh' -print0 | xargs -0 -n1 bash -n
           bash -n bin/obs
-          AGENTOTEL_STACK_UUID=00000000-0000-4000-8000-000000000001 GATEWAY_INGEST_TOKEN=ci-ingest-token GATEWAY_QUERY_TOKEN=ci-query-token GF_SECURITY_ADMIN_PASSWORD=ci-grafana-password docker compose --profile demo --profile dashboard config >/dev/null
+          AGENTOTEL_STACK_UUID=00000000-0000-4000-8000-000000000001 AGENTOTEL_PROJECT_ID=00000000-0000-4000-8000-000000000002 GATEWAY_INGEST_TOKEN=ci-ingest-token GATEWAY_QUERY_TOKEN=ci-query-token docker compose --profile demo --profile dashboard config >/dev/null
+      - name: CI gate coverage contract
+        run: ./scripts/check-ci-gate-coverage.sh
       - name: shellcheck
         run: |
           test_scripts=()
           while IFS= read -r -d '' script; do test_scripts+=("$script"); done < <(find tests -type f -name '*.sh' -print0)
           docker run --rm -v "$PWD:/src" -w /src koalaman/shellcheck-alpine:v0.10.0@sha256:5921d946dac740cbeec2fb1c898747b6105e585130cc7f0602eec9a10f7ddb63 shellcheck -x -e SC1091 bin/obs obs/*.sh libexec/agentotel/*.sh scripts/*.sh workload/*.sh "${test_scripts[@]}"
       - name: Go format
-        run: docker run --rm -v "$PWD/src/gateway:/src" -w /src golang:1.26.6-bookworm@sha256:116d58cbd88c1297624acc6e967a060012422bacf9930927e23fb719189c6f36 gofmt -d -e .
+        run: docker run --rm -v "$PWD:/repo" -w /repo/src/gateway golang:1.26.6-bookworm@sha256:116d58cbd88c1297624acc6e967a060012422bacf9930927e23fb719189c6f36 /repo/scripts/check-gofmt.sh /repo/src/gateway
       - name: Go tests and race
         run: |
           docker run --rm -v "$PWD/src/gateway:/src" -w /src golang:1.26.6-bookworm@sha256:116d58cbd88c1297624acc6e967a060012422bacf9930927e23fb719189c6f36 go test ./...
           docker run --rm -v "$PWD/src/gateway:/src" -w /src golang:1.26.6-bookworm@sha256:116d58cbd88c1297624acc6e967a060012422bacf9930927e23fb719189c6f36 go test -race ./...
           docker run --rm -v "$PWD/src/gateway:/src" -w /src golang:1.26.6-bookworm@sha256:116d58cbd88c1297624acc6e967a060012422bacf9930927e23fb719189c6f36 go build ./...
+      - name: Dashboard Go format
+        run: docker run --rm -v "$PWD:/repo" -w /repo/src/dashboard golang:1.26.6-bookworm@sha256:116d58cbd88c1297624acc6e967a060012422bacf9930927e23fb719189c6f36 /repo/scripts/check-gofmt.sh /repo/src/dashboard
+      - name: Dashboard Go tests, race, vet, and build
+        run: |
+          docker run --rm -v "$PWD/src/dashboard:/src" -w /src golang:1.26.6-bookworm@sha256:116d58cbd88c1297624acc6e967a060012422bacf9930927e23fb719189c6f36 go test ./...
+          docker run --rm -v "$PWD/src/dashboard:/src" -w /src golang:1.26.6-bookworm@sha256:116d58cbd88c1297624acc6e967a060012422bacf9930927e23fb719189c6f36 go test -race ./...
+          docker run --rm -v "$PWD/src/dashboard:/src" -w /src golang:1.26.6-bookworm@sha256:116d58cbd88c1297624acc6e967a060012422bacf9930927e23fb719189c6f36 go vet ./...
+          docker run --rm -v "$PWD/src/dashboard:/src" -w /src golang:1.26.6-bookworm@sha256:116d58cbd88c1297624acc6e967a060012422bacf9930927e23fb719189c6f36 go build ./...
+      - name: Dashboard readiness contract
+        run: bash tests/runtime/dashboard_readiness.sh
+      - name: Dashboard JavaScript state tests
+        run: docker run --rm -v "$PWD/src/dashboard:/repo" -w /repo/internal/ui node:22-alpine@sha256:c610fcdfb1d5b4740dd70c284ed3cb16bb857e0f7166196e36a5501df7a3aa32 node --test app_state_test.js
       - name: runtime authoritative checks
         run: tests/runtime/authoritative.sh
       - name: Gateway-only documentation contract
@@ -51,12 +65,31 @@ jobs:
         run: tests/runtime/install_lifecycle.sh
       - name: identity and concurrency checks
         run: bash tests/runtime/identity_concurrency.sh
+      - name: setup/reset lifecycle and lock recovery checks
+        run: |
+          bash tests/runtime/lock_recovery.sh
+          bash tests/runtime/setup_concurrency.sh
+          bash tests/runtime/lifecycle_concurrency.sh
+      - name: dashboard, CLI, and runtime contract checks
+        run: |
+          bash tests/cli/overview_contract.sh
+          bash tests/runtime/dashboard_make_targets.sh
+          bash tests/runtime/e2e_trace_readiness.sh
+          bash tests/runtime/image_provenance.sh
+          bash tests/runtime/compose_project_identity.sh
+          bash tests/runtime/compose_network_contract.sh
+          bash tests/runtime/ci_port_selection.sh
+          bash tests/runtime/credentials_compose.sh
+          bash tests/runtime/reset_hermetic.sh
+          bash tests/runtime/shell_call_counts.sh
+          bash tests/runtime/ci_supply_chain_cleanup.sh
+          bash tests/runtime/install_hash_tools.sh
+          bash tests/runtime/install_concurrency.sh
       - name: hermetic security, cardinality, and storage checks
         run: |
           ./scripts/test-security.sh
           ./scripts/test-cardinality.sh
           ./scripts/test-storage-pressure.sh
-          ./security/test-trivy-waivers.sh
       - name: app tests
         run: docker run --rm -v "$PWD:/src" -w /src/src/app node:22-alpine@sha256:c610fcdfb1d5b4740dd70c284ed3cb16bb857e0f7166196e36a5501df7a3aa32 sh -c 'npm ci && npm test'
       - name: dependency audit
@@ -112,13 +145,7 @@ jobs:
         run: |
           ./scripts/verify-image-provenance.sh
           ./scripts/test-backend-health.sh
-          docker run --rm -v "$PWD:/src" -w /src hadolint/hadolint:2.12.0@sha256:30a8fd2e785ab6176eed53f74769e04f125afb2f74a6c52aef7d463583b6d45e hadolint src/app/Dockerfile src/gateway/Dockerfile src/grafana/Dockerfile
-      - name: VictoriaLogs plugin supply-chain gate
-        run: |
-          if ! grep -Fq 'victoriametrics-logs-datasource-v0.31.0.tar.gz' src/grafana/Dockerfile; then exit 1; fi
-          if ! grep -Fq '6b6d7b27354ad972946318aac2a54f04363375e7cd5d1cad9d3bb74d00eb970b' src/grafana/Dockerfile; then exit 1; fi
-          if grep -Fq 'GF_INSTALL_PLUGINS' docker-compose.yml; then exit 1; fi
-          test "$(curl -fsSL 'https://github.com/VictoriaMetrics/victorialogs-datasource/releases/download/v0.31.0/victoriametrics-logs-datasource-v0.31.0.tar.gz' | sha256sum | awk '{print $1}')" = '6b6d7b27354ad972946318aac2a54f04363375e7cd5d1cad9d3bb74d00eb970b'
+          docker run --rm -v "$PWD:/src" -w /src hadolint/hadolint:2.12.0@sha256:30a8fd2e785ab6176eed53f74769e04f125afb2f74a6c52aef7d463583b6d45e hadolint src/app/Dockerfile src/dashboard/Dockerfile src/gateway/Dockerfile src/backend-health/Dockerfile.collector src/backend-health/Dockerfile.victorialogs src/backend-health/Dockerfile.victoriametrics src/backend-health/Dockerfile.victoriatraces
       - name: repository hygiene and action validation
         run: |
           git diff --check
@@ -135,7 +162,7 @@ jobs:
       AGENTOTEL_STACK_UUID: 00000000-0000-4000-8000-000000000001
       GATEWAY_INGEST_TOKEN: ci-live-ingest-${{ github.run_id }}
       GATEWAY_QUERY_TOKEN: ci-live-query-${{ github.run_id }}
-      GF_SECURITY_ADMIN_PASSWORD: ci-live-grafana-${{ github.run_id }}
+      RUN_DASHBOARD_E2E: "1"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Live stack, workload, contracts, and partial-backend gate
@@ -146,6 +173,13 @@ jobs:
     timeout-minutes: 20
     permissions:
       contents: read
+    env:
+      COMPOSE_PROJECT_NAME: agentotel-supply-${{ github.run_id }}-${{ github.run_attempt }}
+      AGENTOTEL_RUNTIME_VERSION: ci-${{ github.run_id }}-${{ github.run_attempt }}
+      AGENTOTEL_STACK_UUID: 00000000-0000-4000-8000-000000000001
+      AGENTOTEL_PROJECT_ID: 00000000-0000-4000-8000-000000000002
+      GATEWAY_INGEST_TOKEN: scan-ingest-${{ github.run_id }}
+      GATEWAY_QUERY_TOKEN: scan-query-${{ github.run_id }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -156,31 +190,31 @@ jobs:
             sh -ec 'GOBIN=/tmp/bin go install golang.org/x/vuln/cmd/govulncheck@v1.6.0 && /tmp/bin/govulncheck ./...'
           docker run --rm -v "$PWD/src/mcp:/src" -w /src golang:1.26.6-bookworm@sha256:116d58cbd88c1297624acc6e967a060012422bacf9930927e23fb719189c6f36 \
             sh -ec 'GOBIN=/tmp/bin go install golang.org/x/vuln/cmd/govulncheck@v1.6.0 && /tmp/bin/govulncheck ./...'
+          docker run --rm -v "$PWD/src/dashboard:/src" -w /src golang:1.26.6-bookworm@sha256:116d58cbd88c1297624acc6e967a060012422bacf9930927e23fb719189c6f36 \
+            sh -ec 'GOBIN=/tmp/bin go install golang.org/x/vuln/cmd/govulncheck@v1.6.0 && /tmp/bin/govulncheck ./...'
       - name: Build images for scan
         run: |
-          export COMPOSE_PROJECT_NAME=agentotel-supply-${{ github.run_id }}
-          export AGENTOTEL_RUNTIME_VERSION=ci-${{ github.run_id }}
-          export AGENTOTEL_STACK_UUID=00000000-0000-4000-8000-000000000001 GATEWAY_INGEST_TOKEN=scan-ingest GATEWAY_QUERY_TOKEN=scan-query GF_SECURITY_ADMIN_PASSWORD=scan-password
-          make setup
-          docker compose --profile demo --profile dashboard build app gateway grafana
+          # Build-only scan: do not create persistent volumes just to inspect
+          # images. If a future step creates resources, the exact-label cleanup
+          # helper below is the only permitted cleanup path.
+          docker compose --profile demo --profile dashboard build app gateway dashboard victorialogs victoriametrics victoriatraces otel-collector
       - name: Trivy HIGH/CRITICAL gate (pinned image)
         run: |
-          mkdir -p artifacts
-          runtime_tag="ci-${{ github.run_id }}"
-          for image in "dev-observability/app:${runtime_tag}" "dev-observability/gateway:${runtime_tag}" "dev-observability/grafana:${runtime_tag}"; do
-            if [[ "$image" == */grafana:* ]]; then
-              docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v "$PWD:/src" -w /src aquasec/trivy:0.73.0@sha256:7cced7cae583819fc7806d4cbc0dbbc7cad18b99f7d3e235192e6da8c091045c image --format json --severity HIGH,CRITICAL "$image" > artifacts/grafana-trivy.json
-              TRIVY_REPORT=artifacts/grafana-trivy.json ./scripts/verify-trivy-waivers.sh "$image" artifacts/grafana-trivy.json
-            else
-              docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy:0.73.0@sha256:7cced7cae583819fc7806d4cbc0dbbc7cad18b99f7d3e235192e6da8c091045c image --exit-code 1 --severity HIGH,CRITICAL "$image"
-            fi
+          set -euo pipefail
+          resolved_file="$RUNNER_TEMP/resolved-images.json"
+          docker compose --profile demo --profile dashboard config --format json >"$resolved_file"
+          jq -e 'all(.services[]; (.build == null) or (.image != null and .image != ""))' "$resolved_file" >/dev/null
+          build_image_count="$(jq '[.services[] | select(.build != null) | .image] | length' "$resolved_file")"
+          test "$build_image_count" -gt 0
+          mapfile -t images < <(jq -r '.services[] | .image // empty' "$resolved_file" | sort -u)
+          test "${#images[@]}" -ge "$build_image_count"
+          printf '%s\n' "${images[@]}" | grep -Fxq 'busybox@sha256:73aaf090f3d85aa34ee199857f03fa3a95c8ede2ffd4cc2cdb5b94e566b11662'
+          # Scan every image resolved by Compose, including non-build runtime
+          # images such as the exact pinned BusyBox queue initializer. There is
+          # no waiver and no manually maintained omission list.
+          for image in "${images[@]}"; do
+            docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy:0.73.0@sha256:7cced7cae583819fc7806d4cbc0dbbc7cad18b99f7d3e235192e6da8c091045c image --exit-code 1 --severity HIGH,CRITICAL "$image"
           done
-      - name: Upload Trivy residual findings
-        if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: trivy-grafana-waiver-${{ github.run_id }}
-          path: artifacts/
       - name: Action workflow lint (pinned image)
         run: docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.12@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667
       - name: Secret scan (pinned gitleaks history)
@@ -189,4 +223,4 @@ jobs:
         run: docker run --rm -v "$PWD:/repo" zricethezav/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f dir --config=/repo/.gitleaks.toml --max-target-megabytes=5 --redact --no-banner /repo
       - name: Cleanup scan project
         if: always()
-        run: docker compose --project-name agentotel-supply-${{ github.run_id }} --profile demo --profile dashboard down -v --remove-orphans || true
+        run: ./scripts/ci-supply-chain-cleanup.sh

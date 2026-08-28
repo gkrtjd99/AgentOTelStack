@@ -68,6 +68,10 @@ processors:
           - delete_key(attributes, "vcs.repository.url.full")
           - delete_key(attributes, "vcs.repository.url")
           - delete_key(attributes, "vcs.user")
+          # Stable URL query/fragment components can carry caller secrets; keep
+          # host/path context but remove these standalone values outright.
+          - delete_key(attributes, "url.query")
+          - delete_key(attributes, "url.fragment")
           - replace_pattern(attributes["http.url"], "[?#].*$", "") where attributes["http.url"] != nil
           - replace_pattern(attributes["url.full"], "[?#].*$", "") where attributes["url.full"] != nil
           - replace_pattern(attributes["http.request.header.authorization"], ".+", "[REDACTED]") where attributes["http.request.header.authorization"] != nil
@@ -101,6 +105,10 @@ processors:
           - delete_key(attributes, "gen_ai.completion")
           - delete_key(attributes, "gen_ai.input.messages")
           - delete_key(attributes, "gen_ai.output.messages")
+          # Stable URL query/fragment components can carry caller secrets; keep
+          # host/path context but remove these standalone values outright.
+          - delete_key(attributes, "url.query")
+          - delete_key(attributes, "url.fragment")
           - replace_pattern(attributes["http.request.header.authorization"], ".+", "[REDACTED]") where attributes["http.request.header.authorization"] != nil
           - replace_pattern(attributes["http.request.header.cookie"], ".+", "[REDACTED]") where attributes["http.request.header.cookie"] != nil
           - replace_pattern(attributes["http.url"], "[?#].*$", "") where attributes["http.url"] != nil
@@ -129,6 +137,9 @@ processors:
           - delete_key(attributes, "vcs.repository.url.full")
           - delete_key(attributes, "vcs.repository.url")
           - delete_key(attributes, "vcs.user")
+          # Apply the same URL-component policy to span-event attributes.
+          - delete_key(attributes, "url.query")
+          - delete_key(attributes, "url.fragment")
           - replace_pattern(attributes["http.request.header.authorization"], ".+", "[REDACTED]") where attributes["http.request.header.authorization"] != nil
           - replace_pattern(attributes["http.request.header.cookie"], ".+", "[REDACTED]") where attributes["http.request.header.cookie"] != nil
           - replace_pattern(attributes["http.url"], "[?#].*$", "") where attributes["http.url"] != nil

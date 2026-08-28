@@ -3,6 +3,7 @@ package query
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -75,7 +76,7 @@ func TestLogsErrorsAndTracesCarryErrorAndScopePredicates(t *testing.T) {
 			fmt.Fprint(w, `[{"severity_text":"error"}]`)
 		case "/select/jaeger/api/traces":
 			traceQuery = r.URL.Query()
-			fmt.Fprint(w, `{"data":[]}`)
+			fmt.Fprint(w, `{"data":[{"spans":[],"processes":{}}]}`)
 		default:
 			http.NotFound(w, r)
 		}
@@ -90,7 +91,7 @@ func TestLogsErrorsAndTracesCarryErrorAndScopePredicates(t *testing.T) {
 	if got := logQuery.Get("query"); got != `severity_text:"error" service.name:"checkout" project:"123e4567-e89b-42d3-a456-426614174000"` {
 		t.Fatalf("error log query = %q", got)
 	}
-	if _, err := c.TracesQueryScoped(tContext(), "checkout", project, 25); err != nil {
+	if _, err := c.TracesQueryScoped(tContext(), "checkout", project, start, end, 25); err != nil {
 		t.Fatal(err)
 	}
 	var tags map[string]string
@@ -99,6 +100,74 @@ func TestLogsErrorsAndTracesCarryErrorAndScopePredicates(t *testing.T) {
 	}
 	if tags["error"] != "true" || tags["resource_attr:project"] != project {
 		t.Fatalf("error trace tags = %#v", tags)
+	}
+	if traceQuery.Get("service") != "checkout" || traceQuery.Get("limit") != "25" {
+		t.Fatalf("error trace filters = %#v", traceQuery)
+	}
+	if traceQuery.Get("start") != "1700000000000000" || traceQuery.Get("end") != "1700000060000000" {
+		t.Fatalf("error trace window = %#v", traceQuery)
+	}
+}
+
+func TestTracesQueryScopedWindowResults(t *testing.T) {
+	const project = "123e4567-e89b-42d3-a456-426614174000"
+	start := time.Unix(1700000000, 123000000)
+	end := time.Unix(1700000060, 456000000)
+	tests := []struct {
+		name        string
+		status      int
+		body        string
+		wantNoData  bool
+		wantBackend int
+	}{
+		{name: "non-empty", status: http.StatusOK, body: `{"data":[{"spans":[],"processes":{}}]}`},
+		{name: "empty data", status: http.StatusOK, body: `{"data":[]}`, wantNoData: true},
+		{name: "backend failure", status: http.StatusServiceUnavailable, body: "backend unavailable", wantBackend: http.StatusServiceUnavailable},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var got url.Values
+			s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				got = r.URL.Query()
+				if tc.status >= 300 {
+					http.Error(w, tc.body, tc.status)
+					return
+				}
+				_, _ = w.Write([]byte(tc.body))
+			}))
+			defer s.Close()
+
+			_, err := (Client{Traces: s.URL}).TracesQueryScoped(tContext(), "checkout", project, start, end, 25)
+			if tc.wantNoData {
+				if !errors.Is(err, ErrNoData) {
+					t.Fatalf("err=%v, want ErrNoData", err)
+				}
+			} else if tc.wantBackend != 0 {
+				var backendErr BackendHTTPError
+				if !errors.As(err, &backendErr) || backendErr.StatusCode != tc.wantBackend {
+					t.Fatalf("err=%v, want backend status %d", err, tc.wantBackend)
+				}
+			} else if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			if got.Get("service") != "checkout" || got.Get("limit") != "25" {
+				t.Fatalf("service/limit = %#v", got)
+			}
+			if got.Get("start") != "1700000000123000" || got.Get("end") != "1700000060456000" {
+				t.Fatalf("Jaeger window = %#v", got)
+			}
+			if got.Get("lookback") != "" {
+				t.Fatalf("unexpected Jaeger lookback = %q", got.Get("lookback"))
+			}
+			var tags map[string]string
+			if err := json.Unmarshal([]byte(got.Get("tags")), &tags); err != nil {
+				t.Fatalf("tags are not JSON: %v", err)
+			}
+			if tags["error"] != "true" || tags["resource_attr:project"] != project {
+				t.Fatalf("tags = %#v", tags)
+			}
+		})
 	}
 }
 

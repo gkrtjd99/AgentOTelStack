@@ -166,6 +166,7 @@ jobs:
           ./scripts/test-ci-local.sh
           ./tests/runtime/release_version.sh
           bash tests/runtime/install_lifecycle.sh
+          bash tests/runtime/install_concurrency.sh
           bash tests/runtime/image_tags_rollback.sh
 
       - name: Build and verify the source bundle

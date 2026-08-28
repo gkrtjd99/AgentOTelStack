@@ -10,8 +10,10 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -31,6 +33,8 @@ const (
 	requestLimit            = 10 * time.Second
 	defaultQueryConcurrency = 16
 	maxQueryConcurrency     = 128
+	defaultIngestListenAddr = "0.0.0.0:4318"
+	defaultQueryListenAddr  = "0.0.0.0:17777"
 )
 
 var ingestPaths = []string{"/v1/traces", "/v1/metrics", "/v1/logs"}
@@ -155,7 +159,7 @@ func main() {
 	qcfg.query = qc
 	qcfg.querySem = make(chan struct{}, c.queryMaxConcurrent)
 	server := &http.Server{
-		Addr:              "0.0.0.0:4318",
+		Addr:              envOr("GATEWAY_INGEST_LISTEN_ADDR", defaultIngestListenAddr),
 		Handler:           limitHeaders(mux),
 		ReadHeaderTimeout: 2 * time.Second,
 		ReadTimeout:       requestLimit,
@@ -168,30 +172,62 @@ func main() {
 	}
 	queryMux.HandleFunc("/v1/health", queryHealth(qcfg))
 	queryMux.HandleFunc("/v1/version", queryVersion)
-	queryServer := &http.Server{Addr: "0.0.0.0:17777", Handler: limitHeaders(queryMux), ReadHeaderTimeout: 2 * time.Second, ReadTimeout: requestLimit, WriteTimeout: requestLimit}
-	go func() {
-		log.Printf("gateway listening on %s", server.Addr)
-		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Printf("gateway stopped: %v", err)
-		}
-	}()
-	go func() {
-		log.Printf("gateway query listening on %s", queryServer.Addr)
-		if err := queryServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Printf("query gateway stopped: %v", err)
-		}
-	}()
+	queryServer := &http.Server{Addr: envOr("GATEWAY_QUERY_LISTEN_ADDR", defaultQueryListenAddr), Handler: limitHeaders(queryMux), ReadHeaderTimeout: 2 * time.Second, ReadTimeout: requestLimit, WriteTimeout: requestLimit}
+
+	// Bind both sockets before starting either HTTP server. If the second bind
+	// fails, the first socket is closed and startup returns nonzero instead of
+	// leaving a half-working gateway waiting forever for a signal.
+	ingestListener, queryListener, err := bindListeners(server.Addr, queryServer.Addr)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer ingestListener.Close()
+	defer queryListener.Close()
+
+	serveErrors := make(chan error, 2)
+	go serve(server, ingestListener, "gateway", serveErrors)
+	go serve(queryServer, queryListener, "query gateway", serveErrors)
 
 	signals := make(chan os.Signal, 1)
 	signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
-	<-signals
-	signal.Stop(signals)
+	select {
+	case <-signals:
+		signal.Stop(signals)
+	case err := <-serveErrors:
+		signal.Stop(signals)
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Fatalf("gateway listener stopped: %v", err)
+		}
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), requestLimit)
 	defer cancel()
 	if err := server.Shutdown(ctx); err != nil {
 		log.Printf("gateway shutdown: %v", err)
 	}
-	_ = queryServer.Shutdown(ctx)
+	if err := queryServer.Shutdown(ctx); err != nil {
+		log.Printf("query gateway shutdown: %v", err)
+	}
+}
+
+func bindListeners(ingestAddr, queryAddr string) (net.Listener, net.Listener, error) {
+	if strings.TrimSpace(ingestAddr) == "" || strings.TrimSpace(queryAddr) == "" || strings.ContainsAny(ingestAddr+queryAddr, "\r\n") {
+		return nil, nil, errors.New("invalid gateway listen address")
+	}
+	ingest, err := net.Listen("tcp", ingestAddr)
+	if err != nil {
+		return nil, nil, fmt.Errorf("bind gateway ingest listener %q: %w", ingestAddr, err)
+	}
+	query, err := net.Listen("tcp", queryAddr)
+	if err != nil {
+		_ = ingest.Close()
+		return nil, nil, fmt.Errorf("bind gateway query listener %q: %w", queryAddr, err)
+	}
+	return ingest, query, nil
+}
+
+func serve(server *http.Server, listener net.Listener, name string, serveErrors chan<- error) {
+	log.Printf("%s listening on %s", name, listener.Addr())
+	serveErrors <- server.Serve(listener)
 }
 
 // queryHealth proves both that the query listener is reachable and that the
@@ -366,7 +402,9 @@ func queryHandler(c config, path string) http.HandlerFunc {
 					})
 				}},
 				{name: "traces", fn: func(ctx context.Context) (any, error) {
-					return retry(ctx, func() (any, error) { return c.query.TracesQueryScoped(ctx, in.Service, in.Project, in.Limit) })
+					return retry(ctx, func() (any, error) {
+						return c.query.TracesQueryScoped(ctx, in.Service, in.Project, start, end, in.Limit)
+					})
 				}},
 			})
 			for _, result := range results {
@@ -429,7 +467,7 @@ func queryHandler(c config, path string) http.HandlerFunc {
 		}
 		partial := false
 		for _, b := range backs {
-			if b.Status != "ok" {
+			if backendOperationalFailure(b.Status) {
 				partial = true
 			}
 		}
@@ -491,12 +529,33 @@ var projectionKeys = map[string]struct{}{
 	"data": {}, "items": {}, "traceid": {}, "trace_id": {}, "spanid": {}, "span_id": {},
 	"operationname": {}, "operation": {}, "starttime": {}, "start_time": {}, "duration": {},
 	"duration_ms": {}, "processid": {}, "process_id": {}, "references": {}, "spans": {},
-	"processes": {}, "service": {}, "service_name": {}, "status": {}, "status_code": {},
-	"severity_text": {}, "message": {}, "time": {}, "timestamp": {}, "metric": {}, "value": {},
+	"processes": {}, "service": {}, "service_name": {}, "service.name": {}, "servicename": {}, "status": {}, "status_code": {},
+	"severity_text": {}, "message": {}, "time": {}, "timestamp": {}, "_time": {}, "metric": {}, "value": {},
 	"values": {}, "result": {}, "resulttype": {}, "type": {}, "name": {},
 }
 
 func clean(s string) string { return ansiRE.ReplaceAllString(strings.ToValidUTF8(s, "�"), "") }
+
+// projectProcesses preserves Jaeger's process IDs as map keys so spans can be
+// joined to their canonical process serviceName. The process values still pass
+// through the same allowlist; arbitrary telemetry fields never become allowed
+// merely because they are nested below this container.
+func projectProcesses(v any) any {
+	m, ok := v.(map[string]any)
+	if !ok {
+		return project(v)
+	}
+	out := map[string]any{}
+	for k, value := range m {
+		key := clean(k)
+		if key == "" || len(key) > 128 {
+			continue
+		}
+		out[key] = project(value)
+	}
+	return out
+}
+
 func project(v any) any {
 	switch x := v.(type) {
 	case string:
@@ -511,6 +570,10 @@ func project(v any) any {
 		for k, val := range x {
 			lk := strings.ToLower(k)
 			if _, allowed := projectionKeys[lk]; !allowed || strings.Contains(lk, "query") || strings.Contains(lk, "prompt") || strings.Contains(lk, "secret") || strings.Contains(lk, "token") || strings.Contains(lk, "password") || strings.Contains(lk, "body") || strings.Contains(lk, "sql") || strings.Contains(lk, "url") {
+				continue
+			}
+			if lk == "processes" {
+				out[clean(k)] = projectProcesses(val)
 				continue
 			}
 			out[clean(k)] = project(val)
@@ -555,6 +618,19 @@ func retryable(err error) bool {
 	}
 	return errors.As(err, &netErr) && (netErr.Timeout() || netErr.Temporary())
 }
+
+// backendOperationalFailure keeps evidence absence distinct from an outage.
+// no_matching_data, trace_not_stored, and signal_not_observed are valid query
+// outcomes; unavailable, timeout, decode, and integrity failures are partial.
+func backendOperationalFailure(status string) bool {
+	switch status {
+	case "ok", "no_matching", "no_matching_data", "trace_not_stored", "signal_not_observed", "unsupported":
+		return false
+	default:
+		return true
+	}
+}
+
 func backendStatus(e error) string {
 	if errors.Is(e, query.ErrTraceNotStored) {
 		return "trace_not_stored"

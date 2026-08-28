@@ -14,6 +14,25 @@ const { safeReq } = require("./safe-request");
 const path = require("path");
 
 const safeRes = (res) => ({ statusCode: res.statusCode });
+const traceIDHeader = "X-AgentOTel-Trace-ID";
+const traceIDPattern = /^[0-9a-f]{32}$/i;
+
+// Response trace IDs are deliberately opt-in. The default app contract never
+// exposes telemetry identifiers to callers; CI/local integration can enable
+// this narrow header to prove correlation for the exact request it forced.
+function activeTraceID(span = trace.getActiveSpan()) {
+  if (process.env.AGENTOTEL_EXPOSE_TRACE_ID_HEADER !== "1") return "";
+  const traceID = span?.spanContext?.().traceId;
+  return typeof traceID === "string" && traceIDPattern.test(traceID)
+    ? traceID.toLowerCase()
+    : "";
+}
+
+function setOptInTraceIDHeader(res, span = trace.getActiveSpan()) {
+  const traceID = activeTraceID(span);
+  if (traceID) res.setHeader(traceIDHeader, traceID);
+  return traceID;
+}
 
 const app = express();
 const logger = require("pino")({
@@ -78,6 +97,7 @@ app.get("/api/orders/:id", async (req, res) => {
   orderLatency.record(Number(process.hrtime.bigint() - start) / 1e9, {
     outcome: "success",
   });
+  setOptInTraceIDHeader(res, span);
   res.json({ orderId: id, processedInMs: work });
 });
 
@@ -87,7 +107,10 @@ app.get("/api/checkout", async (req, res) => {
   const start = process.hrtime.bigint();
   const span = trace.getActiveSpan();
   const forced = req.query.fail === "1";
-  const flaky = Math.random() < 0.15; // 15% baseline error rate
+  // The browser journey uses ?success=1 so its happy path is deterministic;
+  // ordinary workload traffic keeps the intentional baseline failure rate.
+  const deterministicSuccess = req.query.success === "1";
+  const flaky = !deterministicSuccess && Math.random() < 0.15; // 15% baseline error rate
 
   await sleep(10 + Math.floor(Math.random() * 40));
 
@@ -100,6 +123,7 @@ app.get("/api/checkout", async (req, res) => {
     orderLatency.record(Number(process.hrtime.bigint() - start) / 1e9, {
       outcome: "error",
     });
+    setOptInTraceIDHeader(res, span);
     return res.status(500).json({ error: err.message });
   }
 
@@ -108,6 +132,7 @@ app.get("/api/checkout", async (req, res) => {
   orderLatency.record(Number(process.hrtime.bigint() - start) / 1e9, {
     outcome: "success",
   });
+  setOptInTraceIDHeader(res, span);
   res.json({ status: "paid" });
 });
 
@@ -132,4 +157,11 @@ if (require.main === module) {
   startServer();
 }
 
-module.exports = { app, createListenHandler, startServer };
+module.exports = {
+  app,
+  activeTraceID,
+  createListenHandler,
+  setOptInTraceIDHeader,
+  startServer,
+  traceIDHeader,
+};

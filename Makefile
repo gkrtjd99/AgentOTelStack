@@ -5,7 +5,7 @@ setup: dev-setup ## Repository development setup (installed operations use `obs 
 	@:
 
 dev-setup: ## Explicit checkout development setup
-	AGENTOTEL_DEV_MODE=1 ./bin/obs setup
+	./scripts/make-compose.sh setup
 
 install: ## Install an immutable self-contained runtime (VERSION=x.y.z; WITHOUT_MCP=1 to omit MCP)
 	./scripts/install.sh $(if $(WITHOUT_MCP),--without-mcp,) $(or $(VERSION),$$(cat VERSION))
@@ -17,16 +17,16 @@ up: dev-up ## Repository development stack (installed operations use `obs up`)
 	@:
 
 dev-up: dev-setup ## Start shared infra from the checkout
-	AGENTOTEL_DEV_MODE=1 ./bin/obs up
+	./scripts/make-compose.sh compose up -d
 
 demo: dev-setup ## Start infra + bundled sample app from the checkout
-	AGENTOTEL_DEV_MODE=1 ./bin/obs compose --profile demo up -d --build
+	./scripts/make-compose.sh compose --profile demo up -d --build
 
 down: dev-down ## Repository development stop (installed operations use `obs down`)
 	@:
 
 dev-down: ## Stop the checkout development stack
-	AGENTOTEL_DEV_MODE=1 ./bin/obs down
+	./scripts/make-compose.sh compose --profile demo --profile dashboard down --remove-orphans
 
 clean: dev-down ## Stop the stack (preserves telemetry volumes)
 	@:
@@ -44,12 +44,12 @@ migrate: ## Refuse unsafe automatic volume migration; prints manual backup flow
 	./bin/obs migrate volumes --confirm
 
 logs: ## Tail collector + app logs
-	AGENTOTEL_DEV_MODE=1 ./bin/obs compose logs -f otel-collector app
+	./scripts/make-compose.sh compose logs -f otel-collector app
 
 load: ## Generate synthetic workload (make load N=500)
 	./workload/run.sh $(or $(N),300)
 
-smoke: ## Run end-to-end stack smoke test (make smoke N=120)
+smoke: ## Run authenticated Gateway read-path smoke (make smoke N=120)
 	./bin/obs credentials run -- ./scripts/smoke.sh $(or $(N),120)
 
 security-test: ## Run hermetic gateway security/redaction checks
@@ -76,21 +76,26 @@ storage-test: ## Run hermetic storage pressure and identity checks
 shell-call-test: ## Verify shell command-count budgets and output contracts
 	bash tests/runtime/shell_call_counts.sh
 
-ci-local: ## Run locally available CI parity gates (never mutates stack volumes)
+ci-local: ## Run strict local release gates (hosted-only jobs are reported, never mutates stack volumes)
 	./scripts/test-ci-local.sh
 
-dashboard: ## Show a terminal dashboard / overview (make dashboard SERVICE=sample-app MODE=compact LOOKBACK=15m)
+dashboard: ## Start the Go browser dashboard at http://localhost:3001
+	./scripts/make-compose.sh dashboard
+
+dashboard-down: ## Stop the dashboard service while preserving telemetry and core services
+	./scripts/make-compose.sh compose --profile dashboard stop dashboard
+
+overview: ## Show the terminal dashboard / overview (SERVICE=sample-app MODE=compact LOOKBACK=15m)
 	@AGENTOTEL_DEV_MODE=1 ./bin/obs credentials run -- ./obs/overview.sh $(if $(MODE),--$(MODE),) $(if $(LOOKBACK),--lookback $(LOOKBACK),) $(or $(SERVICE),sample-app)
 
-grafana: ## Start optional Grafana dashboard UI at http://localhost:3001
-	AGENTOTEL_DEV_MODE=1 ./bin/obs compose --profile dashboard up -d grafana
+e2e: ## Run the complete browser suite (demo + dashboard)
+	./scripts/run-e2e.sh all
 
-grafana-down: ## Stop optional Grafana dashboard UI
-	AGENTOTEL_DEV_MODE=1 ./bin/obs compose --profile dashboard stop grafana
-	AGENTOTEL_DEV_MODE=1 ./bin/obs compose --profile dashboard rm -f grafana
+e2e-app: ## Run only the sample-app browser journey (demo profile)
+	./scripts/run-e2e.sh app
 
-e2e: ## Run the browser UI journey
-	cd e2e && npm install && npm run install-browsers && npm test
+e2e-dashboard: ## Run only the Go dashboard browser journey (dashboard spec; demo + dashboard profiles)
+	./scripts/run-e2e.sh dashboard
 
 mcp-build: ## Build the read-only MCP stdio adapter for this host
 	./scripts/build-mcp.sh bin/agentotel-mcp
@@ -105,9 +110,9 @@ mcp-race: ## Run MCP race tests
 	docker run --rm -v "$(PWD)/src/mcp:/src" -w /src golang:1.26.6-bookworm@sha256:116d58cbd88c1297624acc6e967a060012422bacf9930927e23fb719189c6f36 go test -race ./...
 
 ps: ## Show stack status
-	./bin/obs compose ps
+	./scripts/make-compose.sh compose ps
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  \033[36m%-8s\033[0m %s\n", $$1, $$2}'
 
-.PHONY: setup dev-setup up dev-up down dev-down clean doctor storage disk cardinality canary reset migrate logs load smoke security-test cardinality-test identity-test credentials-test image-tags-test storage-test shell-call-test ci-local dashboard grafana grafana-down e2e mcp-build mcp-test mcp-race ps help
+.PHONY: setup dev-setup up dev-up down dev-down clean doctor storage disk cardinality canary reset migrate logs load smoke security-test cardinality-test identity-test credentials-test image-tags-test storage-test shell-call-test ci-local dashboard dashboard-down overview e2e e2e-app e2e-dashboard mcp-build mcp-test mcp-race ps help

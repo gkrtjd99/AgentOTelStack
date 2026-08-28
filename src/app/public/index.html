@@ -29,7 +29,7 @@
       }
       document.getElementById("order").onclick = () =>
         hit("/api/orders/" + Math.floor(Math.random() * 1000), "order");
-      document.getElementById("checkout").onclick = () => hit("/api/checkout", "checkout");
+      document.getElementById("checkout").onclick = () => hit("/api/checkout?success=1", "checkout");
       document.getElementById("fail").onclick = () => hit("/api/checkout?fail=1", "forced failure");
     </script>
   </body>

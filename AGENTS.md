@@ -1,116 +1,111 @@
-# AGENTS.md — Observability stack operating guide
+# AgentOTelStack agent contract
 
-This repo gives any coding agent (Claude Code, Codex, OpenCode, …) a full local
-observability stack and a feedback loop: **observe → reason → change code →
-re-run workload → observe again.**
+This repository gives an agent a local observability feedback loop:
+**observe → reason → change code → re-run the workload → observe again**.
+`CLAUDE.md` is a symlink to this file; keep that relationship intact when
+editing the agent contract.
 
-You (the agent) interact with telemetry through the shell scripts in `./obs`.
-You do **not** need any SDK or client library — just `curl` via these wrappers.
+## The required loop
 
-## The loop you run
+1. **Generate signal.** Start the checkout demo when needed, then use
+   `./workload/run.sh` or a supported Make browser journey. Browser E2E is
+   Make-only: use `make e2e`, `make e2e-app`, or `make e2e-dashboard`. Direct
+   `cd e2e && npm test` is unsupported and must be rejected.
+2. **Observe.** Use the authenticated bounded helpers through the credential
+   loader. Do not call Victoria, Collector, or raw backend query APIs directly.
+3. **Correlate before concluding.** Select a 32-lowercase-hex `trace_id` from a
+   failing error/log/trace result and run `correlate.sh`. A metric shows that a
+   problem exists; the correlated spans and logs show where the request failed.
+4. **Reason and change.** Change the application under observation, normally
+   `src/app` or the explicitly supplied service. Keep credentials and raw
+   telemetry out of source and logs.
+5. **Re-run and compare.** Rebuild only the changed checkout service, repeat the
+   workload, and leave the before/after evidence visible for the next agent.
 
-1. **Generate signal** — start the stack, then drive traffic:
-   `./workload/run.sh` (synthetic load) or `cd e2e && npm test` (browser journey).
-2. **Observe** — query the three signals with `./obs/*.sh` (see below).
-3. **Correlate** — take a `trace_id` from a failing request and run
-   `./obs/correlate.sh <trace_id>` to see its spans, every related log line,
-   and a same-service metrics snapshot.
-4. **Reason & change** — edit code under `./src/app` (or your own service).
-5. **Re-run** — `AGENTOTEL_DEV_MODE=1 ./bin/obs compose --profile demo up -d --build app` to restart with your change,
-   then re-run the workload and compare the metrics. Repeat.
-
-## Architecture (what's running)
-
-```
-app (OTLP) ──> Gateway :4318 ──> otel-collector ──fanout──> Victoria stores
-              Gateway :17777 ──> bounded context/errors/correlate projections
-```
-
-- The **OpenTelemetry Collector** is the single fan-out point — it receives all
-  OTLP signals and replicates them to the three stores.
-- Query access is authenticated and projected by the Gateway. The `obs/*` tools
-  never accept backend URLs or raw LogQL/PromQL/Jaeger queries.
-
-## Query tools (your interface)
-
-The query helpers use `GATEWAY_URL` (default `http://127.0.0.1:17777`) and
-`GATEWAY_QUERY_TOKEN`. After `obs setup`, run a helper through the credential
-loader so the token is read from the 0600 XDG store without printing it:
-`./bin/obs credentials run -- ./obs/services.sh`. An explicitly supplied
-`GATEWAY_QUERY_TOKEN` remains supported for controlled operator/test overrides.
-
-| Tool | Signal | Example |
-|---|---|---|
-| `./obs/logs.sh [service] [lookback] [limit]` | projected errors/log evidence | `./bin/obs credentials run -- ./obs/logs.sh sample-app 15m 20` |
-| `./obs/metrics.sh [service] [lookback]` | projected metric context | `./bin/obs credentials run -- ./obs/metrics.sh sample-app 15m` |
-| `./obs/traces.sh search-errors <service> [limit] [lookback]` | projected failing traces | `./bin/obs credentials run -- ./obs/traces.sh search-errors sample-app 20 1h` |
-| `./obs/correlate.sh <32-hex-trace-id>` | bounded correlation | `./bin/obs credentials run -- ./obs/correlate.sh 7f3a2b...` |
-| `./obs/app.sh <subcmd> ...` | multi-app helper | `./bin/obs credentials run -- ./obs/app.sh summary sample-app` |
-| `./obs/overview.sh [--compact\|--json] [--lookback 15m] [service]` | terminal dashboard | `./bin/obs credentials run -- ./obs/overview.sh --compact sample-app` |
-| `AGENTOTEL_DEV_MODE=1 ./bin/obs compose --profile dashboard up -d grafana` | browser dashboard | `http://localhost:3001` |
-
-Common starting queries:
+For a checkout change, the focused restart is:
 
 ```bash
-# Bounded metric context for a service
-./bin/obs credentials run -- ./obs/metrics.sh sample-app 15m
-
-# Most recent projected errors (each may carry a trace_id)
-./bin/obs credentials run -- ./obs/logs.sh sample-app 15m 20
-
-# Recent failing traces for the app
-./bin/obs credentials run -- ./obs/traces.sh search-errors sample-app 20 1h
-
-# Drill into one failing request end-to-end
-./bin/obs credentials run -- ./obs/correlate.sh <trace_id-from-a-log-or-trace>
-
-# Multi-app summary / terminal dashboard
-./bin/obs credentials run -- ./obs/app.sh services
-./bin/obs credentials run -- ./obs/app.sh summary sample-app
-./bin/obs credentials run -- ./obs/overview.sh --compact --lookback 15m sample-app
-./bin/obs credentials run -- ./obs/overview.sh --json --since 15m sample-app
+AGENTOTEL_DEV_MODE=1 ./bin/obs compose --profile demo up -d --build app
+./workload/run.sh 300
 ```
 
-## Making a change and verifying it
+## Runtime boundary
 
-```bash
-# 1. baseline
-./workload/run.sh 300
-./bin/obs credentials run -- ./obs/metrics.sh sample-app 15m
-
-# 2. edit src/app/src/index.js (e.g. fix the flaky checkout path)
-
-# 3. rebuild just the app and re-run
-./bin/obs compose --profile demo up -d --build app
-./workload/run.sh 300
-
-# 4. confirm the error rate dropped
-./bin/obs credentials run -- ./obs/metrics.sh sample-app 15m
-
-# Optional: run the full write/read path smoke test
-./bin/obs credentials run -- ./scripts/smoke.sh
+```text
+app or your service -- authenticated OTLP/HTTP :4318 --> Gateway
+agent or human       -- authenticated bounded queries :17777 --> Gateway
+Gateway --> OpenTelemetry Collector --> Victoria Logs/Metrics/Traces
 ```
 
-## Conventions for agents
+The Gateway is the only host-facing telemetry edge. The Collector is the
+single fan-out point and is an internal app destination. Query access is
+authenticated and projected by the Gateway; the helpers never accept raw
+LogQL, PromQL, Jaeger queries, backend URLs, or arbitrary project selectors.
 
-- **Always correlate before concluding.** A metric tells you *that* something is
-  wrong; a trace + its logs tell you *where*. Use `correlate.sh`; it also prints
-  a same-service metrics snapshot for context.
-- **Logs carry `trace_id`/`span_id`** (auto-injected by OTel) — pivot on them.
-- **Log level field is `severity_text`** (`info`/`warn`/`error`), not `level`.
-- **Don't guess time ranges** — Gateway helpers accept bounded lookbacks such as
-  `5m`, `15m`, `1h`, `6h`, and `24h`; they do not accept backend query syntax.
-- **The app is swappable.** To observe a different service, replace `./src/app` (keep
-  it emitting authenticated OTLP to the Gateway) — everything else is unchanged.
-- After a fix, **leave the workload re-run output** so the next agent sees the
-  before/after.
+The default core is six Compose services: `gateway`, `otel-collector`, the
+one-shot `otelcol-queue-init`, and the three Victoria stores. The `demo` profile
+adds `app`; the `dashboard` profile adds the Go Dashboard. The Go Dashboard is
+the sole browser UI, uses a dedicated network shared with Gateway, has a
+standalone default of loopback `127.0.0.1:3000`, and is published by Compose on
+loopback `127.0.0.1:3001`. It is not the agent automation path: use these
+scripts and the terminal `overview` command.
+
+## Query tools
+
+Installed operation commands use `obs`. From a source checkout, use
+`AGENTOTEL_DEV_MODE=1 ./bin/obs ...` or run a helper through the credential
+loader so the 0600 XDG store is read without printing a token.
+
+| Purpose | Installed command | Checkout helper |
+| --- | --- | --- |
+| List services | `obs services` | `AGENTOTEL_DEV_MODE=1 ./bin/obs credentials run -- ./obs/services.sh` |
+| Bounded context | `obs context --service sample-app --lookback 15m` | `AGENTOTEL_DEV_MODE=1 ./bin/obs credentials run -- ./obs/context.sh sample-app 15m 50` |
+| Recent errors | `obs errors --service sample-app --lookback 15m --limit 20` | `AGENTOTEL_DEV_MODE=1 ./bin/obs credentials run -- ./obs/logs.sh sample-app 15m 20` |
+| Error evidence (logs + traces) | `obs errors --service sample-app --lookback 1h --limit 20` | `AGENTOTEL_DEV_MODE=1 ./bin/obs credentials run -- ./obs/traces.sh search-errors sample-app 20 1h` |
+| Correlate one request | `obs correlate <trace-id>` | `AGENTOTEL_DEV_MODE=1 ./bin/obs credentials run -- ./obs/correlate.sh <trace-id>` |
+| Terminal overview | `make overview SERVICE=sample-app` | `AGENTOTEL_DEV_MODE=1 ./bin/obs credentials run -- ./obs/overview.sh --compact --lookback 15m sample-app` |
+
+Gateway lookbacks are exactly `5m`, `15m`, `1h`, `6h`, and `24h`; helper limits
+are bounded. A query normally carries the workspace project from
+`.agentotel/project.toml`. `--global` removes only that query filter. It does
+not bypass authentication, ingest scope, lifecycle guards, or stack
+administration. Read [`docs/QUERY.md`](./docs/QUERY.md) for response states and
+the complete correlation workflow.
+
+## Agent invariants
+
+- Logs use `severity_text` (`info`, `warn`, or `error`), not a guessed `level`
+  field. Logs and spans carry `trace_id`/`span_id` when instrumentation emits
+  them.
+- Do not guess a time range or invent a zero for missing data. Preserve
+  `no_matching_data`, `partial`, `truncated`, and backend-unavailable states.
+- Always use the Gateway's authenticated query path. Never expose
+  `GATEWAY_INGEST_TOKEN`, `GATEWAY_QUERY_TOKEN`, or Dashboard credentials in
+  output.
+- `agentotel.project.id` is workspace provenance and query scope, not
+  authentication. Keep the project metadata local and preserve it when
+  replacing a checkout.
+- `src/app` is swappable, but the bundled workload and browser journeys depend
+  on its documented HTTP and telemetry contract. See
+  [`docs/REPLACE_SAMPLE_APP.md`](./docs/REPLACE_SAMPLE_APP.md).
+- After a fix, leave the workload re-run output and state what changed in the
+  comparison.
 
 ## Ports
 
-| Service | Port | Purpose |
-|---|---|---|
-| sample-app | 3000 | app + UI (`http://localhost:3000`) |
-| Gateway | 4318 / 17777 | host-facing authenticated OTLP ingest / query |
-| otel-collector | 4317/4318 | internal OTLP gRPC/HTTP fan-out only |
-| VictoriaLogs / Metrics / Traces | 9428 / 8428 / 10428 | backend-only, internal network |
-| Grafana | 3001 | Optional dashboard profile |
+| Service | Port | Boundary |
+| --- | --- | --- |
+| Gateway ingest | `127.0.0.1:4318` | Authenticated OTLP/HTTP |
+| Gateway query | `127.0.0.1:17777` | Authenticated bounded projections |
+| sample app | `127.0.0.1:3000` | `demo` profile only |
+| Dashboard | `127.0.0.1:3001` | `dashboard` profile, loopback only |
+| Collector and Victoria stores | Docker-internal | Never an app/query target |
+
+## Public references
+
+- [`docs/README.md`](./docs/README.md) — English authority index
+- [`docs/OPERATIONS.md`](./docs/OPERATIONS.md) — lifecycle and storage
+- [`docs/QUERY.md`](./docs/QUERY.md) — bounded evidence queries
+- [`docs/DEVELOPMENT.md`](./docs/DEVELOPMENT.md) — checkout workflow and tests
+- [`docs/TROUBLESHOOTING.md`](./docs/TROUBLESHOOTING.md) — diagnosis
+- [`docs/SECURITY.md`](./docs/SECURITY.md) — security boundaries

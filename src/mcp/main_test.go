@@ -103,7 +103,7 @@ func TestCredentialsPrecedenceAndSecurity(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	write(filepath.Join(dir, "credentials"), `{"ingest_token":"ingest-token","query_token":" json-token ","grafana_admin_password":"grafana-token"}`, 0600)
+	write(filepath.Join(dir, "credentials"), `{"ingest_token":"ingest-token","query_token":" json-token "}`, 0600)
 	write(filepath.Join(dir, "query.token"), "raw-token", 0600)
 	if got, _ := cred(); got != "json-token" {
 		t.Fatal(got)
@@ -132,20 +132,24 @@ func TestCredentialsStoreValidation(t *testing.T) {
 	}{
 		{
 			name: "generated store",
-			data: `{"ingest_token":"ingest-token","query_token":"query-token","grafana_admin_password":"grafana-token"}`,
+			data: `{"ingest_token":"ingest-token","query_token":"query-token"}`,
 			want: "query-token",
 		},
 		{
 			name: "missing query token",
-			data: `{"ingest_token":"ingest-token","grafana_admin_password":"grafana-token"}`,
+			data: `{"ingest_token":"ingest-token"}`,
 		},
 		{
 			name: "empty query token",
-			data: `{"ingest_token":"ingest-token","query_token":"  ","grafana_admin_password":"grafana-token"}`,
+			data: `{"ingest_token":"ingest-token","query_token":"  "}`,
 		},
 		{
 			name: "unknown field",
-			data: `{"ingest_token":"ingest-token","query_token":"query-token","grafana_admin_password":"grafana-token","unexpected":"value"}`,
+			data: `{"ingest_token":"ingest-token","query_token":"query-token","unexpected":"value"}`,
+		},
+		{
+			name: "legacy admin field",
+			data: `{"ingest_token":"ingest-token","query_token":"query-token","grafana_admin_password":"must-not-be-read"}`,
 		},
 		{
 			name: "malformed json",
@@ -184,7 +188,7 @@ func TestCredentialsStoreSymlinkAndMode(t *testing.T) {
 	if err := os.Mkdir(dir, 0700); err != nil {
 		t.Fatal(err)
 	}
-	valid := []byte(`{"ingest_token":"ingest-token","query_token":"query-token","grafana_admin_password":"grafana-token"}`)
+	valid := []byte(`{"ingest_token":"ingest-token","query_token":"query-token"}`)
 	t.Run("symlink", func(t *testing.T) {
 		target := filepath.Join(d, "target-credentials")
 		if err := os.WriteFile(target, valid, 0600); err != nil {

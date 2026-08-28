@@ -8,6 +8,53 @@ git init -q; git config user.email test@example.invalid; git config user.name te
 printf base >file; git add file; git commit -qm base
 "$ROOT/libexec/agentotel/dispatch.sh" init >/dev/null
 "$ROOT/libexec/agentotel/dispatch.sh" credentials ensure >/dev/null
+# Existing and dangling stack identity symlinks are both rejected before read.
+stack_file="$XDG_STATE_HOME/agentotel/stack.uuid"
+printf '%s\n' 99999999-9999-4999-8999-999999999999 >"$tmp/stack-target"
+ln -s "$tmp/stack-target" "$stack_file"
+if "$ROOT/libexec/agentotel/dispatch.sh" stack-id >"$tmp/symlink.out" 2>&1; then
+  echo 'existing stack.uuid symlink was accepted' >&2; exit 1
+fi
+grep -q 'symlink rejected' "$tmp/symlink.out"
+rm -f "$stack_file"
+ln -s "$tmp/dangling-target" "$stack_file"
+if "$ROOT/libexec/agentotel/dispatch.sh" stack-id >"$tmp/dangling.out" 2>&1; then
+  echo 'dangling stack.uuid symlink was accepted' >&2; exit 1
+fi
+grep -q 'symlink rejected' "$tmp/dangling.out"
+rm -f "$stack_file"
+printf '%s\n' abcdef12-abcd-4abc-8abc-abcdef123456 | tr 'a-f' 'A-F' >"$stack_file"
+if "$ROOT/libexec/agentotel/dispatch.sh" stack-id >"$tmp/uppercase.out" 2>&1; then
+  echo 'uppercase persisted stack UUID was accepted' >&2; exit 1
+fi
+grep -q 'invalid stack UUID' "$tmp/uppercase.out"
+rm -f "$stack_file"
+# Delay UUID generation to force two first readers through the portable lock.
+mkdir -p "$tmp/fakebin"
+real_od=$(command -v od)
+cat >"$tmp/fakebin/od" <<EOF
+#!/bin/sh
+sleep .1
+exec "$real_od" "\$@"
+EOF
+chmod 755 "$tmp/fakebin/od"
+PATH="$tmp/fakebin:$PATH" "$ROOT/libexec/agentotel/dispatch.sh" stack-id >"$tmp/identity-one" & identity_one_pid=$!
+PATH="$tmp/fakebin:$PATH" "$ROOT/libexec/agentotel/dispatch.sh" stack-id >"$tmp/identity-two" & identity_two_pid=$!
+wait "$identity_one_pid" "$identity_two_pid"
+[ "$(cat "$tmp/identity-one")" = "$(cat "$tmp/identity-two")" ]
+[ "$(cat "$stack_file")" = "$(cat "$tmp/identity-one")" ]
+printf '%s\n' "$(cat "$stack_file")" | grep -Eq '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+rm -f "$stack_file"
+explicit_stack=11111111-1111-4111-8111-111111111111
+resolved_stack=$(AGENTOTEL_STACK_UUID="$explicit_stack" "$ROOT/libexec/agentotel/dispatch.sh" stack-id)
+[ "$resolved_stack" = "$explicit_stack" ]
+[ "$(cat "$XDG_STATE_HOME/agentotel/stack.uuid")" = "$explicit_stack" ]
+if AGENTOTEL_STACK_UUID=22222222-2222-4222-8222-222222222222 "$ROOT/libexec/agentotel/dispatch.sh" stack-id >"$tmp/stack-mismatch.out" 2>&1; then
+  echo 'explicit stack UUID mismatch unexpectedly replaced persisted identity' >&2
+  exit 1
+fi
+grep -q 'does not match persisted stack UUID' "$tmp/stack-mismatch.out"
+[ "$(AGENTOTEL_STACK_UUID='' "$ROOT/libexec/agentotel/dispatch.sh" stack-id)" = "$explicit_stack" ]
 project_id=$(sed -n 's/.*project_id = "\([^"]*\)".*/\1/p' .agentotel/project.toml)
 printf '%s\n' "$project_id" | grep -Eq '^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
 one=$("$ROOT/libexec/agentotel/dispatch.sh" source-state); cid=$(printf '%s' "$one" | sed -n 's/.*"checkout_id":"\([^"]*\)".*/\1/p')
@@ -30,7 +77,7 @@ set -eu
 [ "$OTEL_EXPORTER_OTLP_HEADERS" = Authorization=Bearer%20aaaaaaaa ]
 [ -z "${GATEWAY_INGEST_TOKEN:-}" ]
 [ -z "${GATEWAY_QUERY_TOKEN:-}" ]
-[ -z "${GF_SECURITY_ADMIN_PASSWORD:-}" ]
+if env | grep -Eq '^GF_[^=]*='; then exit 1; fi
 EOF
 chmod +x "$tmp/bin/env-check"
 EXPECTED_PROJECT_ID="$project_id" GATEWAY_INGEST_TOKEN=aaaaaaaa "$ROOT/libexec/agentotel/dispatch.sh" run --service test-service -- "$tmp/bin/env-check"

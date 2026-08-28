@@ -3,8 +3,12 @@
 . "$(dirname "$0")/common.sh"
 mkdirs
 REG="$STATE/runs"; LOCK="$REG.lock"; mkdir -p "$REG"; chmod 700 "$REG"
-lock(){ i=0; while ! mkdir "$LOCK" 2>/dev/null; do i=$((i+1)); [ "$i" -lt 100 ] || die 'registry busy' 75; sleep .01; done; trap 'rmdir "$LOCK" 2>/dev/null || :' EXIT; }
-unlock(){ rmdir "$LOCK" 2>/dev/null || :; trap - EXIT; }
+lock(){
+  lock_acquire "$LOCK" registry 1000
+  registry_lock_token=$AGENTOTEL_LOCK_TOKEN
+  trap 'lock_release "$LOCK" "$registry_lock_token" >/dev/null 2>&1 || :' EXIT
+}
+unlock(){ lock_release "$LOCK" "$registry_lock_token" >/dev/null 2>&1 || :; trap - EXIT; }
 sha(){
   for arg in "$@"; do
     printf '%s:' "${#arg}"
@@ -69,7 +73,8 @@ run(){
   existing=${OTEL_RESOURCE_ATTRIBUTES:-}
   case ",$existing," in *,agentotel.project.id=*) die 'OTEL_RESOURCE_ATTRIBUTES already contains agentotel.project.id';; esac
   export OTEL_RESOURCE_ATTRIBUTES="agentotel.project.id=$project_id${existing:+,$existing}"
-  unset GATEWAY_INGEST_TOKEN GATEWAY_INGEST_TOKEN_FILE GATEWAY_QUERY_TOKEN GATEWAY_QUERY_TOKEN_FILE GF_SECURITY_ADMIN_PASSWORD
+  unset GATEWAY_INGEST_TOKEN GATEWAY_INGEST_TOKEN_FILE GATEWAY_QUERY_TOKEN GATEWAY_QUERY_TOKEN_FILE
+  scrub_retired_grafana_env
   isolated=false
   if command -v setsid >/dev/null 2>&1; then setsid "$@" & isolated=true; else "$@" & fi
   pid=$!; pgid=$(ps -o pgid= -p "$pid" | tr -d ' ')
