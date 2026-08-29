@@ -24,6 +24,12 @@ Always state:
 - each relevant backend status;
 - when the workload and query were run.
 
+Current Gateway responses also provide `kind`, typed `scope`, and `freshness`.
+`freshness` is the Gateway query cutoff in RFC3339 format, not an ingestion-age
+or completeness guarantee. Use it to order evidence and compare before/after
+runs, while retaining the separate `partial`, `truncated`, and backend status
+states.
+
 ## Envelope states
 
 Gateway envelopes require `schema_version: "1.0"`, `partial`, `truncated`,

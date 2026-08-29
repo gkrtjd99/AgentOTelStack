@@ -22,7 +22,7 @@ service=$4
   echo 'runtime controls: invalid service name' >&2
   exit 2
 }
-for dependency in awk curl grep jq od seq; do
+for dependency in awk curl grep jq od python3 seq; do
   command -v "$dependency" >/dev/null 2>&1 || {
     echo "runtime controls: required dependency not found: $dependency" >&2
     exit 1
@@ -109,32 +109,121 @@ safe_response() {
   ' "$file" >/dev/null
 }
 
-correlation_ok() {
-  jq -e --arg trace "$trace" '
-    .schema_version == "1.0" and .partial == false and
+freshness_ok() {
+  local file=$1 value
+  value=$(jq -er '.freshness' "$file") || return 1
+  python3 - "$value" <<'PY'
+from datetime import datetime
+import re
+import sys
+import time
+
+raw = sys.argv[1].replace("Z", "+00:00")
+match = re.fullmatch(r"(.*\.)([0-9]+)([+-][0-9]{2}:[0-9]{2})", raw)
+if match:
+    raw = match.group(1) + match.group(2)[:6].ljust(6, "0") + match.group(3)
+try:
+    value = datetime.fromisoformat(raw)
+except ValueError:
+    raise SystemExit(1)
+if value.tzinfo is None or abs(time.time() - value.timestamp()) > 120:
+    raise SystemExit(1)
+PY
+}
+metadata_ok() {
+  local file=$1 kind=$2 expected_project=$3 expected_service=$4 expected_trace=$5 limit=$6
+  jq -e --arg kind "$kind" --arg project "$expected_project" --arg service "$expected_service" --arg trace "$expected_trace" --argjson limit "$limit" '
+    .schema_version == "1.0" and .kind == $kind and
+    .partial == false and .truncated == false and
     .content_trust == "untrusted_telemetry" and
+    (.scope.project // "") == $project and
+    (.scope.service // "") == $service and
+    (.scope.trace_id // "") == $trace and
+    .scope.lookback == "5m" and .scope.limit == $limit and
+    ([.backends[]?.status] | length > 0 and all(. == "ok"))
+  ' "$file" >/dev/null && freshness_ok "$file"
+}
+correlation_ok() {
+  metadata_ok "$1" gateway.correlate.v1 "$project" "" "$trace" 100 &&
+  jq -e --arg trace "$trace" '
+    def trace_value: .trace_id // .traceID // .traceId // .traceid // "";
     .data.correlation.trace_id == $trace and
     ((.data.correlation.spans // []) | length > 0) and
-    (.data.correlation.logs != null) and
-    (.data.correlation.metrics != null) and
-    ([.data.correlation.logs[]? | select(.trace_id == $trace)] | length > 0)
+    ((.data.correlation.logs // []) | length > 0) and
+    (((.data.correlation.metrics.data.result // []) | length > 0) or
+      ((.data.correlation.metrics.result // []) | length > 0)) and
+    ([.data.correlation.logs[]? | select(trace_value == $trace)] | length > 0)
   ' "$1" >/dev/null
 }
 errors_ok() {
+  metadata_ok "$1" gateway.errors.v1 "$project" "$service" "" 100 &&
   jq -e --arg trace "$trace" '
-    .schema_version == "1.0" and .partial == false and
-    ([.. | objects | select((.trace_id // .traceID // empty) == $trace)] | length > 0)
+    def trace_value: .trace_id // .traceID // .traceId // .traceid // "";
+    ([.data.logs, .data.traces] | [.. | objects | select(trace_value == $trace)] | length > 0)
   ' "$1" >/dev/null
 }
 context_metrics_ok() {
+  metadata_ok "$1" gateway.context.v1 "$project" "$service" "" 100 &&
   jq -e '
-    .schema_version == "1.0" and .partial == false and
     .data.metrics.status == "success" and
-    (.data.metrics.data.resultType == "vector" or .data.metrics.data.resultType == "matrix") and
+    .data.metrics.data.resultType == "vector" and
     ((.data.metrics.data.result // []) | length > 0) and
     ([.data.metrics.data.result[]?.metric // {} | keys[]?] as $keys |
-      ($keys | length > 0) and ($keys | all(. == "service_name")))
+      ($keys | length > 0) and ($keys | all(. == "service_name")) and
+      ([.data.metrics.data.result[]?.metric.service_name] | all(. == "sample-app")))
   ' "$1" >/dev/null
+}
+negative_scope_ok() {
+  local file=$1 kind=$2 expected_project=$3 expected_service=$4
+  jq -e --arg kind "$kind" --arg project "$expected_project" --arg service "$expected_service" '
+    def trace_value: .trace_id // .traceID // .traceId // .traceid // "";
+    .schema_version == "1.0" and .kind == $kind and
+    .partial == false and .truncated == false and
+    .content_trust == "untrusted_telemetry" and
+    (.scope.project // "") == $project and (.scope.service // "") == $service and
+    ([.data.logs, .data.traces, .data.metrics, .data.correlation] |
+      [.. | objects | select(trace_value != "")] | length == 0)
+  ' "$file" >/dev/null && freshness_ok "$file"
+}
+
+debug_response() {
+  local label=$1 file=$2
+  if ! jq -c --arg trace "$trace" '
+    def trace_value: .trace_id // .traceID // .traceId // .traceid // "";
+    {
+      schema_version,
+      kind,
+      partial,
+      truncated,
+      freshness: (.freshness // null),
+      expected_trace: $trace,
+      scope: (.scope // {}),
+      content_trust,
+      backend_statuses: [.backends[]?.status],
+      data_keys: ((.data // {}) | keys),
+      correlation_counts: {
+        spans: ((.data.correlation.spans // []) | if type == "array" then length else -1 end),
+        logs: ((.data.correlation.logs // []) | if type == "array" then length else -1 end),
+        log_trace_matches: ([.data.correlation.logs[]? | select(trace_value == $trace)] | length),
+        metrics: (((.data.correlation.metrics.data.result // .data.correlation.metrics.result // []) | if type == "array" then length else -1 end))
+      },
+      context_metrics: {
+        status: (.data.metrics.status // null),
+        result_type: (.data.metrics.data.resultType // null),
+        result_count: ((.data.metrics.data.result // []) | if type == "array" then length else -1 end),
+        label_keys: ([.data.metrics.data.result[]?.metric // {} | keys[]?] | unique),
+        service_names: [.data.metrics.data.result[]?.metric.service_name]
+      },
+      error_counts: {
+        logs: ((.data.logs // []) | if type == "array" then length else -1 end),
+        traces: ((.data.traces // []) | if type == "array" then length else -1 end),
+        trace_matches: ([.data.logs, .data.traces] |
+          [.. | objects | select(trace_value == $trace)] | length)
+      }
+    }
+  ' "$file" >&2; then
+    printf 'runtime controls: %s response was not valid JSON\n' "$label" >&2
+  fi
 }
 
 correlation_file="$tmp/correlation"
@@ -150,7 +239,13 @@ while (( $(date +%s) < deadline )); do
   query_get /v1/context "$context_file" \
     --data-urlencode "service=$service" --data-urlencode "project=$project" \
     --data-urlencode 'lookback=5m' --data-urlencode 'limit=100' || :
-  if correlation_ok "$correlation_file" && errors_ok "$errors_file" && context_metrics_ok "$context_file"; then
+  correlation_state=fail
+  errors_state=fail
+  context_state=fail
+  if correlation_ok "$correlation_file"; then correlation_state=pass; fi
+  if errors_ok "$errors_file"; then errors_state=pass; fi
+  if context_metrics_ok "$context_file"; then context_state=pass; fi
+  if [[ "$correlation_state" == pass && "$errors_state" == pass && "$context_state" == pass ]]; then
     ready=1
     break
   fi
@@ -158,6 +253,11 @@ while (( $(date +%s) < deadline )); do
 done
 [[ "$ready" == 1 ]] || {
   echo 'runtime controls: live Gateway evidence did not become complete before timeout' >&2
+  printf 'runtime controls: predicate states correlation=%s errors=%s context=%s\n' \
+    "$correlation_state" "$errors_state" "$context_state" >&2
+  debug_response correlation "$correlation_file"
+  debug_response errors "$errors_file"
+  debug_response context "$context_file"
   exit 1
 }
 
@@ -167,5 +267,35 @@ for response in "$correlation_file" "$errors_file" "$context_file"; do
     exit 1
   }
 done
+
+# Negative scope probes prove that the positive evidence was not satisfied by a
+# service-name match or an older project snapshot. They use the same bounded
+# authenticated Gateway path and retain the normal envelope checks.
+wrong_project=00000000-0000-4000-8000-000000000003
+wrong_project_file="$tmp/wrong-project"
+wrong_service_file="$tmp/wrong-service"
+query_get /v1/errors "$wrong_project_file" \
+  --data-urlencode "service=$service" --data-urlencode "project=$wrong_project" \
+  --data-urlencode 'lookback=5m' --data-urlencode 'limit=100' || {
+  echo 'runtime controls: wrong-project probe request failed' >&2
+  exit 1
+}
+query_get /v1/context "$wrong_service_file" \
+  --data-urlencode 'service=runtime-service-that-does-not-exist' --data-urlencode "project=$project" \
+  --data-urlencode 'lookback=5m' --data-urlencode 'limit=100' || {
+  echo 'runtime controls: wrong-service probe request failed' >&2
+  exit 1
+}
+negative_scope_ok "$wrong_project_file" gateway.errors.v1 "$wrong_project" "$service" || {
+  echo 'runtime controls: wrong-project response contained scoped telemetry or invalid metadata' >&2
+  exit 1
+}
+negative_scope_ok "$wrong_service_file" gateway.context.v1 "$project" 'runtime-service-that-does-not-exist' || {
+  echo 'runtime controls: wrong-service response contained scoped telemetry or invalid metadata' >&2
+  exit 1
+}
+safe_response "$wrong_project_file" || { echo 'runtime controls: wrong-project response failed redaction' >&2; exit 1; }
+safe_response "$wrong_service_file" || { echo 'runtime controls: wrong-service response failed redaction' >&2; exit 1; }
+
 metric_rows=$(jq -r '.data.metrics.data.result | length' "$context_file")
-printf 'runtime controls: PASS (live Gateway redaction, exact trace correlation, and bounded metric labels; rows=%s canary=withheld)\n' "$metric_rows"
+printf 'runtime controls: PASS (live Gateway redaction, exact trace/project/service evidence, freshness, and bounded metric labels; rows=%s canary=withheld)\n' "$metric_rows"

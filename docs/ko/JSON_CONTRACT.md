@@ -19,6 +19,14 @@ Response는 [`src/gateway/schemas/envelope.schema.json`](../../src/gateway/schem
 ```json
 {
   "schema_version": "1.0",
+  "kind": "gateway.errors.v1",
+  "freshness": "2026-08-29T12:34:56.789Z",
+  "scope": {
+    "project": "550e8400-e29b-41d4-a716-446655440000",
+    "service": "checkout",
+    "lookback": "15m",
+    "limit": 25
+  },
   "data": {},
   "partial": false,
   "truncated": false,
@@ -30,6 +38,8 @@ Response는 [`src/gateway/schemas/envelope.schema.json`](../../src/gateway/schem
 ```
 
 `data`는 endpoint별로 projection된 object입니다. Bounded response limit에 도달하면 `warnings`가 나타날 수 있습니다. `backends`는 각 signal/backend의 status를 기록하며 bounded safe `error` string을 포함할 수 있습니다. Gateway는 response field를 allowlist하고 control character를 제거하며 oversized response를 거부하고 telemetry text를 신뢰할 수 있는 instruction으로 취급하지 않습니다.
+
+현재 response에는 `kind`, `freshness` 및 `scope` metadata도 포함됩니다. Kind value는 `gateway.services.v1`, `gateway.context.v1`, `gateway.errors.v1` 및 `gateway.correlate.v1`입니다. `scope`는 검증된 request selection을 반영합니다. `--global`에서는 `project`를 생략하고, 해당되는 경우 `service`, `trace_id`, `lookback` 및 `limit`을 포함합니다. `freshness`는 RFC3339 형식의 Gateway query cutoff이며 ingestion age, backend lag 또는 completeness 보장이 아닙니다. Raw Gateway envelope과 Dashboard `dashboard.v1` envelope은 별도 contract입니다. Dashboard는 자체 `fetched_at`과 redacted `project_bound` scope를 생성합니다.
 
 ## Input bounds
 

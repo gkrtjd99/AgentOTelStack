@@ -257,6 +257,10 @@ func envOr(k, d string) string {
 	}
 	return d
 }
+func gatewayEnvelopeKind(path string) string {
+	return "gateway." + strings.TrimPrefix(path, "/v1/") + ".v1"
+}
+
 func queryHandler(c config, path string) http.HandlerFunc {
 	sem := c.querySem
 	if sem == nil {
@@ -471,7 +475,22 @@ func queryHandler(c config, path string) http.HandlerFunc {
 				partial = true
 			}
 		}
-		writeEnvelope(w, status.Envelope{SchemaVersion: "1.0", Data: data, Partial: partial, ContentTrust: "untrusted_telemetry", Backends: backs})
+		writeEnvelope(w, status.Envelope{
+			SchemaVersion: "1.0",
+			Kind:          gatewayEnvelopeKind(path),
+			Data:          data,
+			Partial:       partial,
+			Freshness:     end.UTC().Format(time.RFC3339Nano),
+			Scope: status.Scope{
+				Project:  in.Project,
+				Service:  in.Service,
+				TraceID:  in.TraceID,
+				Lookback: in.Lookback,
+				Limit:    in.Limit,
+			},
+			ContentTrust: "untrusted_telemetry",
+			Backends:     backs,
+		})
 	}
 }
 

@@ -24,6 +24,14 @@ are:
 ```json
 {
   "schema_version": "1.0",
+  "kind": "gateway.errors.v1",
+  "freshness": "2026-08-29T12:34:56.789Z",
+  "scope": {
+    "project": "550e8400-e29b-41d4-a716-446655440000",
+    "service": "checkout",
+    "lookback": "15m",
+    "limit": 25
+  },
   "data": {},
   "partial": false,
   "truncated": false,
@@ -39,6 +47,16 @@ bounded response limit is reached. `backends` records the status of each
 signal/backend and may include a bounded safe `error` string. The Gateway
 allowlists response fields, strips control characters, rejects oversized
 responses, and never treats telemetry text as trusted instructions.
+
+Current responses also include `kind`, `freshness`, and `scope` metadata. The
+kind values are `gateway.services.v1`, `gateway.context.v1`,
+`gateway.errors.v1`, and `gateway.correlate.v1`. `scope` echoes the validated
+request selection: `project` is omitted for `--global`, while `service`,
+`trace_id`, `lookback`, and `limit` are present when applicable. `freshness` is
+the Gateway query cutoff in RFC3339 format; it is not an ingestion-age,
+backend-lag, or completeness guarantee. The raw Gateway envelope and the
+Dashboard `dashboard.v1` envelope are separate contracts: Dashboard creates
+its own `fetched_at` and redacted `project_bound` scope.
 
 ## Input bounds
 

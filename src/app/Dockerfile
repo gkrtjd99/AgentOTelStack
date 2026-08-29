@@ -8,7 +8,10 @@ COPY package.json package-lock.json ./
 RUN npm ci --omit=dev
 
 FROM alpine:3.22@sha256:14358309a308569c32bdc37e2e0e9694be33a9d99e68afb0f5ff33cc1f695dce
-RUN apk add --no-cache libstdc++=14.2.0-r6 libgcc=14.2.0-r6
+# Refresh packages in the pinned base so security fixes are not stranded in
+# the immutable layer; retain exact runtime ABI pins for Node's native deps.
+RUN apk upgrade --no-cache \
+ && apk add --no-cache libstdc++=14.2.0-r6 libgcc=14.2.0-r6
 RUN addgroup -S app && adduser -S -G app app
 COPY --from=deps /usr/local/bin/node /usr/local/bin/node
 COPY --from=deps /app/node_modules /app/node_modules

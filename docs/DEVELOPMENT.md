@@ -94,7 +94,9 @@ runtime contracts. For a strict local inventory use:
 
 Run the Make browser targets rather than invoking Playwright directly. Do not
 run a broad Docker cleanup merely because Markdown or a small source file
-changed; use the lifecycle owned by the target you are testing.
+changed; use the lifecycle owned by the target you are testing. Hosted live
+integration must set `RUN_DASHBOARD_E2E=1`; without it the integration command
+fails instead of claiming backend-only success as complete browser evidence.
 
 ## Observe a code change
 

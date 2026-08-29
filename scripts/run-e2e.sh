@@ -59,11 +59,6 @@ requested_dashboard_port="${DASHBOARD_HOST_PORT:-}"
 port_selection_select || fail 'unable to select required loopback ports'
 printf 'run-e2e: selected loopback ports ingest=%s query=%s app=%s dashboard=%s\n' \
   "$GATEWAY_INGEST_HOST_PORT" "$GATEWAY_QUERY_HOST_PORT" "$APP_HOST_PORT" "$DASHBOARD_HOST_PORT"
-if [[ "${E2E_PORT_SELECTION_SELF_TEST:-0}" == 1 ]]; then
-  printf 'E2E_PORT_SELECTION_SELF_TEST=pass ingest=%s query=%s app=%s dashboard=%s\n' \
-    "$GATEWAY_INGEST_HOST_PORT" "$GATEWAY_QUERY_HOST_PORT" "$APP_HOST_PORT" "$DASHBOARD_HOST_PORT"
-  exit 0
-fi
 
 compose_raw() {
   AGENTOTEL_EXPOSE_TRACE_ID_HEADER=1 \
@@ -245,5 +240,29 @@ env -u COMPOSE_FILE -u COMPOSE_ENV_FILES -u COMPOSE_PATH_SEPARATOR -u COMPOSE_PR
 export APP_URL="$app_url" DASHBOARD_URL="$dashboard_url" \
   DASHBOARD_BOOTSTRAP_URL="$dashboard_url/#token=$DASHBOARD_CLIENT_TOKEN" \
   DASHBOARD_E2E_AUTH_TOKEN="$DASHBOARD_CLIENT_TOKEN"
-"$ROOT/scripts/run-browser-e2e.sh" "$mode"
+# Hand Playwright an unlinked inherited capability rather than a caller-set
+# readiness marker. The proof binds the browser run to this lifecycle's mode,
+# Compose project, telemetry project, and completed Dashboard/runtime stage.
+ready_nonce="$(od -An -N16 -tx1 /dev/urandom | tr -d ' \\n')"
+[[ "$ready_nonce" =~ ^[0-9a-f]{32}$ ]] || fail 'unable to generate E2E readiness nonce'
+dashboard_status=not_required
+if [[ "$mode" == all || "$mode" == dashboard ]]; then
+  dashboard_status=ready
+fi
+ready_proof_file="$(mktemp "${TMPDIR:-/tmp}/agentotel-e2e-ready.XXXXXX")"
+chmod 600 "$ready_proof_file"
+printf '{"version":1,"kind":"agentotel.e2e-ready.v1","mode":"%s","dashboard_status":"%s","project_id":"%s","compose_project":"%s","issued_at":%s,"nonce":"%s"}\n' \
+  "$mode" "$dashboard_status" "$project_uuid" "$project" "$(date +%s)" "$ready_nonce" >"$ready_proof_file"
+exec 9<"$ready_proof_file"
+rm -f "$ready_proof_file"
+export AGENTOTEL_E2E_READY_FD=9 AGENTOTEL_E2E_MODE="$mode"
+browser_rc=0
+if COMPOSE_PROJECT_NAME="$project" AGENTOTEL_PROJECT_ID="$project_uuid" \
+  "$ROOT/scripts/run-browser-e2e.sh" "$mode"; then
+  browser_rc=0
+else
+  browser_rc=$?
+fi
+exec 9<&-
+(( browser_rc == 0 )) || exit "$browser_rc"
 ci_failed=0

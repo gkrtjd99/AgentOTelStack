@@ -62,11 +62,6 @@ requested_dashboard_port="${DASHBOARD_HOST_PORT:-}"
 # retried after a bind failure; explicit selections are never changed. The
 # residual preflight-to-bind race is intentional and bounded.
 port_selection_select || exit $?
-if [[ "${CI_PORT_SELECTION_SELF_TEST:-0}" == 1 ]]; then
-  printf 'PORT_SELECTION_SELF_TEST=pass ingest=%s query=%s app=%s dashboard=%s\n' \
-    "$GATEWAY_INGEST_HOST_PORT" "$GATEWAY_QUERY_HOST_PORT" "$APP_HOST_PORT" "$DASHBOARD_HOST_PORT"
-  exit 0
-fi
 ci_ready_timeout="${CI_READY_POLL_SECONDS:-90}"
 # Keep the CI names distinct from local shell variables (and do not assign to a
 # possibly readonly inherited variable).  Compose and every obs helper consume
@@ -442,14 +437,33 @@ done
 [[ "$recovered" == 1 ]] || { echo "FAIL: VictoriaLogs did not recover (health=$health_status context_http=$recovery_status)" >&2; exit 1; }
 recovery_backend_summary="$(printf '%s' "$recovery_body" | jq -c '[.backends[]? | {name,status}]')"
 printf 'recovery evidence health=%s context_http=%s backend_status=%s\n' "$health_status" "$recovery_status" "$recovery_backend_summary"
-if [[ "${RUN_DASHBOARD_E2E:-0}" == 1 ]]; then
-  command -v npm >/dev/null 2>&1 || { echo 'FAIL: dashboard E2E requested but npm is unavailable' >&2; exit 1; }
-  dashboard_bootstrap_url="${DASHBOARD_URL}/#token=${DASHBOARD_CLIENT_TOKEN}"
-  CI=1 APP_URL="$APP_URL" DASHBOARD_URL="$DASHBOARD_URL" \
-    DASHBOARD_TRACE_ID="$DASHBOARD_TRACE_ID" \
-    DASHBOARD_BOOTSTRAP_URL="$dashboard_bootstrap_url" \
-    DASHBOARD_E2E_AUTH_TOKEN="$DASHBOARD_CLIENT_TOKEN" \
-    "$ROOT/scripts/run-browser-e2e.sh" all
+[[ "${RUN_DASHBOARD_E2E:-0}" == 1 ]] || {
+  echo 'FAIL: live integration requires RUN_DASHBOARD_E2E=1; backend-only success is not a complete CI proof' >&2
+  exit 2
+}
+command -v npm >/dev/null 2>&1 || { echo 'FAIL: dashboard E2E requires npm' >&2; exit 1; }
+dashboard_bootstrap_url="${DASHBOARD_URL}/#token=${DASHBOARD_CLIENT_TOKEN}"
+ready_nonce="$(od -An -N16 -tx1 /dev/urandom | tr -d ' \\n')"
+[[ "$ready_nonce" =~ ^[0-9a-f]{32}$ ]] || { echo 'FAIL: unable to generate E2E readiness nonce' >&2; exit 2; }
+ready_proof_file="$(mktemp "${TMPDIR:-/tmp}/agentotel-ci-e2e-ready.XXXXXX")"
+chmod 600 "$ready_proof_file"
+printf '{"version":1,"kind":"agentotel.e2e-ready.v1","mode":"all","dashboard_status":"ready","project_id":"%s","compose_project":"%s","issued_at":%s,"nonce":"%s"}\n' \
+  "$project_uuid" "$project" "$(date +%s)" "$ready_nonce" >"$ready_proof_file"
+exec 9<"$ready_proof_file"
+rm -f "$ready_proof_file"
+export AGENTOTEL_E2E_READY_FD=9 AGENTOTEL_E2E_MODE=all
+browser_rc=0
+if CI=1 APP_URL="$APP_URL" DASHBOARD_URL="$DASHBOARD_URL" \
+  AGENTOTEL_PROJECT_ID="$project_uuid" COMPOSE_PROJECT_NAME="$project" \
+  DASHBOARD_TRACE_ID="$DASHBOARD_TRACE_ID" \
+  DASHBOARD_BOOTSTRAP_URL="$dashboard_bootstrap_url" \
+  DASHBOARD_E2E_AUTH_TOKEN="$DASHBOARD_CLIENT_TOKEN" \
+  "$ROOT/scripts/run-browser-e2e.sh" all; then
+  browser_rc=0
+else
+  browser_rc=$?
 fi
+exec 9<&-
+(( browser_rc == 0 )) || exit "$browser_rc"
 ci_failed=0
 echo "PASS live integration project=$project stack_uuid=$uuid telemetry_project=$project_uuid ports=app:$APP_HOST_PORT ingest:$GATEWAY_INGEST_HOST_PORT query:$GATEWAY_QUERY_HOST_PORT dashboard:$DASHBOARD_HOST_PORT trace=$trace"

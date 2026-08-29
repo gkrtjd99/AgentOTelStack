@@ -74,7 +74,7 @@ Repository CI는 toolchain portability를 위해 pinned Docker image를 사용�
 ./scripts/test-ci-local.sh
 ```
 
-Playwright를 직접 호출하지 말고 Make browser target을 실행하세요. Markdown이나 작은 source file이 바뀌었다는 이유로 broad Docker cleanup을 실행하지 말고 테스트하는 target이 소유한 lifecycle을 사용하세요.
+Playwright를 직접 호출하지 말고 Make browser target을 실행하세요. Markdown이나 작은 source file이 바뀌었다는 이유로 broad Docker cleanup을 실행하지 말고 테스트하는 target이 소유한 lifecycle을 사용하세요. Hosted live integration은 `RUN_DASHBOARD_E2E=1`을 설정해야 하며, 그렇지 않으면 integration command는 backend-only 성공을 완전한 browser evidence라고 주장하지 않고 실패합니다.
 
 ## Code change 관찰
 

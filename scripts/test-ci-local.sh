@@ -14,15 +14,16 @@ TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/agentotel-ci-local.XXXXXX")"
 GATE_TRACE="$TMP_DIR/gates.invoked"
 cleanup() {
   local status=$? cleanup_failed=0 image
-  if [[ -n "${LOCAL_IMAGE_TAGS:-}" ]] && command -v docker >/dev/null 2>&1; then
+  if [[ -f "$TMP_DIR/local-image-tags" ]] && command -v docker >/dev/null 2>&1; then
     # Remove only images this invocation built; never prune caches or unrelated
     # developer images. Cleanup failures must not be silently swallowed.
-    for image in $LOCAL_IMAGE_TAGS; do
+    while IFS= read -r image; do
+      [[ -n "$image" ]] || continue
       if ! docker image rm -f "$image" >/dev/null 2>&1; then
         printf 'CI local cleanup: failed to remove exact image %s\n' "$image" >&2
         cleanup_failed=1
       fi
-    done
+    done <"$TMP_DIR/local-image-tags"
   fi
   rm -rf "$TMP_DIR"
   if (( status != 0 )); then return "$status"; fi
@@ -31,20 +32,69 @@ cleanup() {
 trap cleanup EXIT HUP INT TERM
 pass=0
 fail=0
+# Gate functions execute in a fresh Bash process so errexit is active inside
+# the function body. The parent still runs every gate and records each status.
+export ROOT TMP_DIR GO_IMAGE NODE_IMAGE SHELLCHECK_IMAGE TRIVY_IMAGE
 
 run_gate() {
   local name=$1; shift
   local output="$TMP_DIR/$name.out"
-  # Record the invocation before execution so a failing gate is still visible
-  # in the final manifest comparison; textual presence alone is insufficient.
-  printf '%s\n' "$name" >>"$GATE_TRACE"
-  if "$@" >"$output" 2>&1; then
+  local runner="$TMP_DIR/$name.run.sh"
+  [[ $# -gt 0 ]] || { printf 'FAIL %s (missing command)\n' "$name" >&2; fail=$((fail + 1)); return; }
+  local command_name=$1
+  local -a command_args=("${@:2}")
+  # Record the logical gate, exact command argv, and observed child status. A
+  # name-only trace could be made to pass by replacing a real command with
+  # `true`, while a pre-execution trace could claim an unrun gate.
+  {
+    printf '#!/usr/bin/env bash\nset -Eeuo pipefail\ncd -- %q\n' "$ROOT"
+    if declare -F "$command_name" >/dev/null 2>&1; then
+      declare -f "$command_name"
+      printf '%q' "$command_name"
+      if ((${#command_args[@]} > 0)); then
+        printf ' %q' "${command_args[@]}"
+      fi
+      printf '\n'
+    else
+      printf 'exec %q' "$command_name"
+      if ((${#command_args[@]} > 0)); then
+        printf ' %q' "${command_args[@]}"
+      fi
+      printf '\n'
+    fi
+  } >"$runner"
+  chmod +x "$runner"
+  gate_status=pass
+  if "$runner" >"$output" 2>&1; then
     printf 'PASS %s\n' "$name"
     pass=$((pass + 1))
   else
+    gate_status=fail
     printf 'FAIL %s\n' "$name" >&2
     sed -n '1,240p' "$output" >&2 || true
     fail=$((fail + 1))
+  fi
+  if ((${#command_args[@]} > 0)); then
+    python3 - "$GATE_TRACE" "$name" "$gate_status" \
+      "$command_name" "${command_args[@]}" <<'PY'
+import json
+import sys
+
+path, name, status, *argv = sys.argv[1:]
+with open(path, "a", encoding="utf-8") as handle:
+    json.dump({"name": name, "argv": argv, "status": status}, handle, separators=(",", ":"))
+    handle.write("\n")
+PY
+  else
+    python3 - "$GATE_TRACE" "$name" "$gate_status" "$command_name" <<'PY'
+import json
+import sys
+
+path, name, status, *argv = sys.argv[1:]
+with open(path, "a", encoding="utf-8") as handle:
+    json.dump({"name": name, "argv": argv, "status": status}, handle, separators=(",", ":"))
+    handle.write("\n")
+PY
   fi
 }
 
@@ -54,6 +104,7 @@ shell_syntax() {
 }
 run_gate gate-coverage ./scripts/check-ci-gate-coverage.sh
 run_gate gate-coverage-fixture bash tests/runtime/ci_gate_coverage.sh
+run_gate gate-runner-fixture bash tests/runtime/ci_local_gate_errexit.sh
 run_gate shell-syntax shell_syntax
 run_gate release-version ./scripts/verify-release-version.sh
 run_gate release-version-fixture bash tests/runtime/release_version.sh
@@ -191,7 +242,15 @@ local_image_scan() {
   docker info >/dev/null 2>&1 || { echo 'Docker daemon is unavailable for local image scan' >&2; return 1; }
   local suffix="ci-local-$$"
   local project="agentotel-ci-local-$$"
-  export LOCAL_IMAGE_TAGS="dev-observability/app:$suffix dev-observability/gateway:$suffix dev-observability/dashboard:$suffix dev-observability/victorialogs:v1.52.0-health-$suffix dev-observability/victoriametrics:v1.150.0-health-$suffix dev-observability/victoriatraces:v0.11.0-health-$suffix dev-observability/otel-collector:v0.159.0-health-$suffix"
+  printf '%s\n' \
+    "dev-observability/app:$suffix" \
+    "dev-observability/gateway:$suffix" \
+    "dev-observability/dashboard:$suffix" \
+    "dev-observability/victorialogs:v1.52.0-health-$suffix" \
+    "dev-observability/victoriametrics:v1.150.0-health-$suffix" \
+    "dev-observability/victoriatraces:v0.11.0-health-$suffix" \
+    "dev-observability/otel-collector:v0.159.0-health-$suffix" \
+    >"$TMP_DIR/local-image-tags"
   COMPOSE_PROJECT_NAME="$project" AGENTOTEL_RUNTIME_VERSION="$suffix" \
   AGENTOTEL_STACK_UUID=00000000-0000-4000-8000-000000000001 \
   AGENTOTEL_PROJECT_ID=00000000-0000-4000-8000-000000000002 \

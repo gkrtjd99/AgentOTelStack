@@ -67,6 +67,8 @@ Overview는 동일한 bounded context envelope를 표현하는 것이며 busines
 
 Service name은 query syntax delimiter가 없는 bounded printable text입니다. Trace ID는 정확히 32개의 lowercase hexadecimal character입니다. Gateway는 bounded limit(`1`–`500`)만 받고 unknown query parameter를 거부합니다. Workspace project가 없거나 invalid한 것은 initialization error이지 backend에 data가 없다는 증거가 아닙니다.
 
+현재 query envelope에는 namespaced `kind`(`gateway.services.v1`, `gateway.context.v1`, `gateway.errors.v1` 또는 `gateway.correlate.v1`), typed `scope` 및 RFC3339 `freshness`가 포함됩니다. `freshness`는 Gateway query cutoff이며 telemetry가 ingest된 시간이나 모든 backend signal이 complete하다는 증명이 아닙니다. Before/after workload run을 비교할 때 `scope`와 `freshness`를 비교하고, `partial`, `truncated` 및 backend status는 별도의 limitation으로 보존하세요. Dashboard `fetched_at`은 Dashboard가 생성하므로 raw Gateway `freshness`로 취급하지 마세요.
+
 ## Signal 및 correlation workflow
 
 단일 signal에서 root-cause conclusion을 내리는 대신 staged workflow를 사용하세요.

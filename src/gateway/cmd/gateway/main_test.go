@@ -561,14 +561,24 @@ func TestErrorsHandlerForwardsBoundedLookbackAndCorrectPartialSemantics(t *testi
 			defer server.Close()
 
 			c := config{queryToken: "query-secret", querySem: make(chan struct{}, 1), query: query.Client{Logs: server.URL, Traces: server.URL}}
+			before := time.Now().UTC()
 			r := httptest.NewRequest(http.MethodGet, "http://gateway/v1/errors?service=checkout&project="+project+"&lookback="+tc.lookback+"&limit=25", nil)
 			r.Header.Set("Authorization", "Bearer query-secret")
 			rr := httptest.NewRecorder()
 			queryHandler(c, "/v1/errors")(rr, r)
+			after := time.Now().UTC()
 			if rr.Code != http.StatusOK {
 				t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
 			}
 			var envelope struct {
+				Kind      string `json:"kind"`
+				Freshness string `json:"freshness"`
+				Scope     struct {
+					Project  string `json:"project"`
+					Service  string `json:"service"`
+					Lookback string `json:"lookback"`
+					Limit    int    `json:"limit"`
+				} `json:"scope"`
 				Partial  bool `json:"partial"`
 				Backends []struct {
 					Name   string `json:"name"`
@@ -577,6 +587,13 @@ func TestErrorsHandlerForwardsBoundedLookbackAndCorrectPartialSemantics(t *testi
 			}
 			if err := json.Unmarshal(rr.Body.Bytes(), &envelope); err != nil {
 				t.Fatalf("decode envelope: %v", err)
+			}
+			freshness, err := time.Parse(time.RFC3339Nano, envelope.Freshness)
+			if err != nil || freshness.Before(before) || freshness.After(after) {
+				t.Fatalf("freshness=%q err=%v, want timestamp within request", envelope.Freshness, err)
+			}
+			if envelope.Kind != "gateway.errors.v1" || envelope.Scope.Project != project || envelope.Scope.Service != "checkout" || envelope.Scope.Lookback != tc.lookback || envelope.Scope.Limit != 25 {
+				t.Fatalf("query metadata = kind %q freshness %q scope %#v", envelope.Kind, envelope.Freshness, envelope.Scope)
 			}
 			traceStatus := ""
 			for _, backend := range envelope.Backends {
@@ -652,10 +669,24 @@ func TestErrorsAndCorrelationCarryProjectScopeAndUnavailableIsPartial(t *testing
 		t.Fatalf("errors project scope = %#v", logQueries)
 	}
 	var errorsEnvelope struct {
+		Kind      string `json:"kind"`
+		Freshness string `json:"freshness"`
+		Scope     struct {
+			Project  string `json:"project"`
+			Service  string `json:"service"`
+			Lookback string `json:"lookback"`
+			Limit    int    `json:"limit"`
+		} `json:"scope"`
 		Partial bool `json:"partial"`
 	}
 	if err := json.Unmarshal(errRR.Body.Bytes(), &errorsEnvelope); err != nil || errorsEnvelope.Partial {
 		t.Fatalf("errors envelope partial=%t err=%v body=%s", errorsEnvelope.Partial, err, errRR.Body.String())
+	}
+	if errorsEnvelope.Kind != "gateway.errors.v1" || errorsEnvelope.Scope.Project != project || errorsEnvelope.Scope.Service != "checkout" || errorsEnvelope.Scope.Lookback != "15m" || errorsEnvelope.Scope.Limit != 5 {
+		t.Fatalf("errors metadata = %#v", errorsEnvelope)
+	}
+	if _, err := time.Parse(time.RFC3339Nano, errorsEnvelope.Freshness); err != nil {
+		t.Fatalf("errors freshness = %q: %v", errorsEnvelope.Freshness, err)
 	}
 
 	corrReq := httptest.NewRequest(http.MethodPost, "http://gateway/v1/correlate", strings.NewReader(`{"trace_id":"`+traceID+`","project":"`+project+`"}`))
@@ -665,6 +696,25 @@ func TestErrorsAndCorrelationCarryProjectScopeAndUnavailableIsPartial(t *testing
 	queryHandler(c, "/v1/correlate")(corrRR, corrReq)
 	if corrRR.Code != http.StatusOK {
 		t.Fatalf("correlate status=%d body=%s", corrRR.Code, corrRR.Body.String())
+	}
+	var corrEnvelope struct {
+		Kind      string `json:"kind"`
+		Freshness string `json:"freshness"`
+		Scope     struct {
+			Project  string `json:"project"`
+			TraceID  string `json:"trace_id"`
+			Lookback string `json:"lookback"`
+			Limit    int    `json:"limit"`
+		} `json:"scope"`
+	}
+	if err := json.Unmarshal(corrRR.Body.Bytes(), &corrEnvelope); err != nil {
+		t.Fatalf("decode correlation metadata: %v", err)
+	}
+	if corrEnvelope.Kind != "gateway.correlate.v1" || corrEnvelope.Scope.Project != project || corrEnvelope.Scope.TraceID != traceID || corrEnvelope.Scope.Lookback != "15m" || corrEnvelope.Scope.Limit != 50 {
+		t.Fatalf("correlation metadata = %#v", corrEnvelope)
+	}
+	if _, err := time.Parse(time.RFC3339Nano, corrEnvelope.Freshness); err != nil {
+		t.Fatalf("correlation freshness = %q: %v", corrEnvelope.Freshness, err)
 	}
 	if len(logQueries) < 2 || !strings.Contains(logQueries[len(logQueries)-1], `project:"`+project+`"`) {
 		t.Fatalf("correlate log project scope = %#v", logQueries)
@@ -687,6 +737,12 @@ func TestErrorsAndCorrelationCarryProjectScopeAndUnavailableIsPartial(t *testing
 	unavailableRR := httptest.NewRecorder()
 	queryHandler(unavailableConfig, "/v1/errors")(unavailableRR, unavailableReq)
 	var unavailableEnvelope struct {
+		Kind      string `json:"kind"`
+		Freshness string `json:"freshness"`
+		Scope     struct {
+			Project string `json:"project"`
+			Limit   int    `json:"limit"`
+		} `json:"scope"`
 		Partial  bool `json:"partial"`
 		Backends []struct {
 			Name   string `json:"name"`
@@ -698,6 +754,12 @@ func TestErrorsAndCorrelationCarryProjectScopeAndUnavailableIsPartial(t *testing
 	}
 	if !unavailableEnvelope.Partial {
 		t.Fatalf("backend outage not partial: %s", unavailableRR.Body.String())
+	}
+	if unavailableEnvelope.Kind != "gateway.errors.v1" || unavailableEnvelope.Scope.Project != project || unavailableEnvelope.Scope.Limit != 50 {
+		t.Fatalf("unavailable response metadata = %#v", unavailableEnvelope)
+	}
+	if _, err := time.Parse(time.RFC3339Nano, unavailableEnvelope.Freshness); err != nil {
+		t.Fatalf("unavailable freshness = %q: %v", unavailableEnvelope.Freshness, err)
 	}
 }
 
@@ -742,6 +804,57 @@ func TestGatewayBindsBothListenersBeforeServing(t *testing.T) {
 		t.Fatalf("first listener leaked after second bind failure: %v", err)
 	}
 	_ = reclaimed.Close()
+}
+
+func TestQueryEnvelopeGlobalScopeAndKinds(t *testing.T) {
+	if got := gatewayEnvelopeKind("/v1/services"); got != "gateway.services.v1" {
+		t.Fatalf("services kind = %q", got)
+	}
+	for _, path := range []string{"/v1/context", "/v1/errors", "/v1/correlate"} {
+		if got := gatewayEnvelopeKind(path); !strings.HasPrefix(got, "gateway.") || !strings.HasSuffix(got, ".v1") {
+			t.Fatalf("%s kind = %q", path, got)
+		}
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/select/logsql/query":
+			_, _ = w.Write([]byte(`[]`))
+		case "/select/jaeger/api/traces":
+			_, _ = w.Write([]byte(`{"data":[]}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	c := config{queryToken: "query-secret", querySem: make(chan struct{}, 1), query: query.Client{Logs: server.URL, Traces: server.URL}}
+	r := httptest.NewRequest(http.MethodGet, "http://gateway/v1/errors?service=checkout", nil)
+	r.Header.Set("Authorization", "Bearer query-secret")
+	rr := httptest.NewRecorder()
+	queryHandler(c, "/v1/errors")(rr, r)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	var envelope struct {
+		Kind      string         `json:"kind"`
+		Freshness string         `json:"freshness"`
+		Scope     map[string]any `json:"scope"`
+		Partial   bool           `json:"partial"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &envelope); err != nil {
+		t.Fatal(err)
+	}
+	if envelope.Kind != "gateway.errors.v1" || envelope.Partial {
+		t.Fatalf("global envelope = %#v", envelope)
+	}
+	if _, ok := envelope.Scope["project"]; ok {
+		t.Fatalf("global scope leaked project field: %#v", envelope.Scope)
+	}
+	if envelope.Scope["service"] != "checkout" || envelope.Scope["lookback"] != "15m" || envelope.Scope["limit"] != float64(50) {
+		t.Fatalf("global scope = %#v", envelope.Scope)
+	}
+	if _, err := time.Parse(time.RFC3339Nano, envelope.Freshness); err != nil {
+		t.Fatalf("global freshness = %q: %v", envelope.Freshness, err)
+	}
 }
 
 func TestBackendOperationalFailureSemantics(t *testing.T) {

@@ -16,6 +16,8 @@ AgentOTelStack은 repository-wide sampler나 모든 application event가 저장�
 - 각각 관련된 backend status
 - workload와 query를 실행한 시간
 
+현재 Gateway response에는 `kind`, typed `scope` 및 `freshness`도 제공됩니다. `freshness`는 RFC3339 형식의 Gateway query cutoff이며 ingestion age 또는 completeness 보장이 아닙니다. 이를 사용해 evidence 순서를 정하고 before/after run을 비교하되, 별도의 `partial`, `truncated` 및 backend status state는 보존하세요.
+
 ## Envelope state
 
 Gateway envelope에는 `schema_version: "1.0"`, `partial`, `truncated`, `content_trust: "untrusted_telemetry"` 및 `backends`가 필요합니다. 다음과 같이 해석하세요.

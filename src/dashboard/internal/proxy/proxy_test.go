@@ -29,7 +29,7 @@ func testHandler(t *testing.T, server *httptest.Server) *Handler {
 }
 
 func envelope(data string) string {
-	return `{"schema_version":"1.0","data":` + data + `,"partial":false,"truncated":false,"content_trust":"untrusted_telemetry","backends":[{"name":"logs","status":"ok"}]}`
+	return `{"schema_version":"1.0","kind":"gateway.context.v1","freshness":"2000-01-01T00:00:00Z","scope":{"project":"` + testProject + `"},"data":` + data + `,"partial":false,"truncated":false,"content_trust":"untrusted_telemetry","backends":[{"name":"logs","status":"ok"}]}`
 }
 
 func TestValidateConfigRequiresFixedProjectAndSafeGateway(t *testing.T) {
@@ -86,6 +86,9 @@ func TestFixedScopeAndHeadersAreApplied(t *testing.T) {
 	}
 	if strings.Contains(rr.Body.String(), testProject) || strings.Contains(rr.Body.String(), "server-query-secret") || strings.Contains(rr.Body.String(), "browser-secret") {
 		t.Fatalf("credential or project escaped browser response: %s", rr.Body.String())
+	}
+	if strings.Contains(rr.Body.String(), "2000-01-01T00:00:00Z") || strings.Contains(rr.Body.String(), "gateway.context.v1") {
+		t.Fatalf("raw Gateway metadata escaped Dashboard response: %s", rr.Body.String())
 	}
 	var view View
 	if err := json.Unmarshal(rr.Body.Bytes(), &view); err != nil {

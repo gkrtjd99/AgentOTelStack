@@ -5,16 +5,51 @@
   "required": ["schema_version", "data", "partial", "truncated", "content_trust", "backends"],
   "properties": {
     "schema_version": {"const": "1.0"},
+    "kind": {"const": "gateway.correlate.v1"},
+    "freshness": {"type": "string", "format": "date-time"},
+    "scope": {
+      "type": "object",
+      "properties": {
+        "project": {"type": "string", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"},
+        "service": {"type": "string", "minLength": 1},
+        "trace_id": {"type": "string", "pattern": "^[0-9a-f]{32}$"},
+        "lookback": {"enum": ["5m", "15m", "1h", "6h", "24h"]},
+        "limit": {"type": "integer", "minimum": 1, "maximum": 500}
+      },
+      "additionalProperties": false
+    },
     "partial": {"type": "boolean"},
     "truncated": {"type": "boolean"},
     "content_trust": {"const": "untrusted_telemetry"},
-    "backends": {"type": "array", "items": {"type": "object", "required": ["name", "status"], "properties": {"name": {"type": "string"}, "status": {"type": "string", "enum": ["ok", "trace_not_stored", "signal_not_observed", "no_matching", "no_matching_data", "backend_unavailable", "backend_decode_error", "timeout", "partial", "telemetry_incomplete"]}, "error": {"type": "string"}}}},
-    "data": {"type": "object", "properties": {
-      "correlation": {"type": "object", "required": ["trace_id", "spans"], "properties": {
-        "trace_id": {"type": "string", "pattern": "^[0-9a-f]{32}$"},
-        "spans": {"type": "array"}, "services": {"type": "array"},
-        "projects": {"type": "array"}, "indicators": {"type": "array"}
-      }}
-    }}
-  }
+    "backends": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "status"],
+        "properties": {
+          "name": {"type": "string"},
+          "status": {"type": "string", "enum": ["ok", "trace_not_stored", "signal_not_observed", "no_matching", "no_matching_data", "backend_unavailable", "backend_decode_error", "timeout", "partial", "telemetry_incomplete"]},
+          "error": {"type": "string"}
+        },
+        "additionalProperties": false
+      }
+    },
+    "data": {
+      "type": "object",
+      "properties": {
+        "correlation": {
+          "type": "object",
+          "required": ["trace_id", "spans"],
+          "properties": {
+            "trace_id": {"type": "string", "pattern": "^[0-9a-f]{32}$"},
+            "spans": {"type": "array"},
+            "services": {"type": "array"},
+            "projects": {"type": "array"},
+            "indicators": {"type": "array"}
+          }
+        }
+      }
+    }
+  },
+  "additionalProperties": true
 }

@@ -66,7 +66,7 @@ grep -Fq 'make dashboard-down' docs/DASHBOARD.md || fail 'DASHBOARD.md must docu
 grep -Fq 'stable checkout-owned lifecycle is Make-only' docs/DASHBOARD.md || fail 'DASHBOARD.md must document the stable dashboard project'
 ! grep -Fq 'npm install' Makefile || fail 'Makefile E2E lifecycle must not use npm install'
 grep -Fq 'npm ci --ignore-scripts --no-audit' scripts/run-browser-e2e.sh || fail 'E2E helper must use lock-preserving npm ci'
-grep -Fq 'npx --no-install playwright' scripts/run-browser-e2e.sh || fail 'E2E helper must use local Playwright via npx --no-install'
+grep -Fq "node \"\$playwright_cli\"" scripts/run-browser-e2e.sh || fail 'E2E helper must invoke the installed Playwright CLI directly'
 
 # Task #32 dashboard architecture contract. These checks deliberately look for
 # security-relevant wording rather than merely a port number: the sole active UI,
