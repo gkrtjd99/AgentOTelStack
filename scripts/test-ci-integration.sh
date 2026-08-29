@@ -3,6 +3,8 @@
 # loopback-only dynamically selected host ports.
 set -Eeuo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"; cd "$ROOT"
+# Keep the browser helper in this real lifecycle's Bash source stack.
+. "$ROOT/scripts/run-browser-e2e.sh"
 normalize_component() {
   printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9_-]/-/g'
 }
@@ -447,23 +449,20 @@ ready_nonce="$(od -An -N16 -tx1 /dev/urandom | tr -d ' \\n')"
 [[ "$ready_nonce" =~ ^[0-9a-f]{32}$ ]] || { echo 'FAIL: unable to generate E2E readiness nonce' >&2; exit 2; }
 ready_proof_file="$(mktemp "${TMPDIR:-/tmp}/agentotel-ci-e2e-ready.XXXXXX")"
 chmod 600 "$ready_proof_file"
-printf '{"version":2,"kind":"agentotel.e2e-ready.v2","mode":"all","dashboard_status":"ready","project_id":"%s","compose_project":"%s","launcher_pid":%s,"launcher_kind":"test-ci-integration","issued_at":%s,"nonce":"%s"}\n' \
-  "$project_uuid" "$project" "$$" "$(date +%s)" "$ready_nonce" >"$ready_proof_file"
-exec 9<"$ready_proof_file"
-rm -f "$ready_proof_file"
-export AGENTOTEL_E2E_READY_FD=9 AGENTOTEL_E2E_MODE=all
+printf '{"version":3,"kind":"agentotel.e2e-ready.v3","mode":"all","dashboard_status":"ready","project_id":"%s","compose_project":"%s","issued_at":%s,"nonce":"%s"}\n' \
+  "$project_uuid" "$project" "$(date +%s)" "$ready_nonce" >"$ready_proof_file"
 browser_rc=0
 if CI=1 APP_URL="$APP_URL" DASHBOARD_URL="$DASHBOARD_URL" \
   AGENTOTEL_PROJECT_ID="$project_uuid" COMPOSE_PROJECT_NAME="$project" \
   DASHBOARD_TRACE_ID="$DASHBOARD_TRACE_ID" \
   DASHBOARD_BOOTSTRAP_URL="$dashboard_bootstrap_url" \
   DASHBOARD_E2E_AUTH_TOKEN="$DASHBOARD_CLIENT_TOKEN" \
-  "$ROOT/scripts/run-browser-e2e.sh" all; then
+  run_browser_e2e all "$ready_proof_file"; then
   browser_rc=0
 else
   browser_rc=$?
 fi
-exec 9<&-
+rm -f "$ready_proof_file"
 (( browser_rc == 0 )) || exit "$browser_rc"
 ci_failed=0
 echo "PASS live integration project=$project stack_uuid=$uuid telemetry_project=$project_uuid ports=app:$APP_HOST_PORT ingest:$GATEWAY_INGEST_HOST_PORT query:$GATEWAY_QUERY_HOST_PORT dashboard:$DASHBOARD_HOST_PORT trace=$trace"

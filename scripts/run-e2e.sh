@@ -2,6 +2,9 @@
 # Start an isolated checkout stack and run the Make-managed browser journey.
 set -Eeuo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# The browser helper is a source-only library; keep the lifecycle caller in the
+# Bash source stack instead of authenticating mutable process command text.
+. "$ROOT/scripts/run-browser-e2e.sh"
 mode="${1:-all}"
 case "$mode" in
   all|app|dashboard) ;;
@@ -240,9 +243,8 @@ env -u COMPOSE_FILE -u COMPOSE_ENV_FILES -u COMPOSE_PATH_SEPARATOR -u COMPOSE_PR
 export APP_URL="$app_url" DASHBOARD_URL="$dashboard_url" \
   DASHBOARD_BOOTSTRAP_URL="$dashboard_url/#token=$DASHBOARD_CLIENT_TOKEN" \
   DASHBOARD_E2E_AUTH_TOKEN="$DASHBOARD_CLIENT_TOKEN"
-# Hand Playwright an unlinked inherited capability rather than a caller-set
-# readiness marker. The proof binds the browser run to this lifecycle's mode,
-# Compose project, telemetry project, and completed Dashboard/runtime stage.
+# Hand the browser lifecycle a temporary proof of the completed setup/runtime
+# stage. It carries scope and freshness, not a self-attested process identity.
 ready_nonce="$(od -An -N16 -tx1 /dev/urandom | tr -d ' \\n')"
 [[ "$ready_nonce" =~ ^[0-9a-f]{32}$ ]] || fail 'unable to generate E2E readiness nonce'
 dashboard_status=not_required
@@ -251,18 +253,15 @@ if [[ "$mode" == all || "$mode" == dashboard ]]; then
 fi
 ready_proof_file="$(mktemp "${TMPDIR:-/tmp}/agentotel-e2e-ready.XXXXXX")"
 chmod 600 "$ready_proof_file"
-printf '{"version":2,"kind":"agentotel.e2e-ready.v2","mode":"%s","dashboard_status":"%s","project_id":"%s","compose_project":"%s","launcher_pid":%s,"launcher_kind":"run-e2e","issued_at":%s,"nonce":"%s"}\n' \
-  "$mode" "$dashboard_status" "$project_uuid" "$project" "$$" "$(date +%s)" "$ready_nonce" >"$ready_proof_file"
-exec 9<"$ready_proof_file"
-rm -f "$ready_proof_file"
-export AGENTOTEL_E2E_READY_FD=9 AGENTOTEL_E2E_MODE="$mode"
+printf '{"version":3,"kind":"agentotel.e2e-ready.v3","mode":"%s","dashboard_status":"%s","project_id":"%s","compose_project":"%s","issued_at":%s,"nonce":"%s"}\n' \
+  "$mode" "$dashboard_status" "$project_uuid" "$project" "$(date +%s)" "$ready_nonce" >"$ready_proof_file"
 browser_rc=0
 if COMPOSE_PROJECT_NAME="$project" AGENTOTEL_PROJECT_ID="$project_uuid" \
-  "$ROOT/scripts/run-browser-e2e.sh" "$mode"; then
+  run_browser_e2e "$mode" "$ready_proof_file"; then
   browser_rc=0
 else
   browser_rc=$?
 fi
-exec 9<&-
+rm -f "$ready_proof_file"
 (( browser_rc == 0 )) || exit "$browser_rc"
 ci_failed=0
