@@ -447,8 +447,8 @@ ready_nonce="$(od -An -N16 -tx1 /dev/urandom | tr -d ' \\n')"
 [[ "$ready_nonce" =~ ^[0-9a-f]{32}$ ]] || { echo 'FAIL: unable to generate E2E readiness nonce' >&2; exit 2; }
 ready_proof_file="$(mktemp "${TMPDIR:-/tmp}/agentotel-ci-e2e-ready.XXXXXX")"
 chmod 600 "$ready_proof_file"
-printf '{"version":1,"kind":"agentotel.e2e-ready.v1","mode":"all","dashboard_status":"ready","project_id":"%s","compose_project":"%s","issued_at":%s,"nonce":"%s"}\n' \
-  "$project_uuid" "$project" "$(date +%s)" "$ready_nonce" >"$ready_proof_file"
+printf '{"version":2,"kind":"agentotel.e2e-ready.v2","mode":"all","dashboard_status":"ready","project_id":"%s","compose_project":"%s","launcher_pid":%s,"launcher_kind":"test-ci-integration","issued_at":%s,"nonce":"%s"}\n' \
+  "$project_uuid" "$project" "$$" "$(date +%s)" "$ready_nonce" >"$ready_proof_file"
 exec 9<"$ready_proof_file"
 rm -f "$ready_proof_file"
 export AGENTOTEL_E2E_READY_FD=9 AGENTOTEL_E2E_MODE=all

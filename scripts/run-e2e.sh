@@ -251,8 +251,8 @@ if [[ "$mode" == all || "$mode" == dashboard ]]; then
 fi
 ready_proof_file="$(mktemp "${TMPDIR:-/tmp}/agentotel-e2e-ready.XXXXXX")"
 chmod 600 "$ready_proof_file"
-printf '{"version":1,"kind":"agentotel.e2e-ready.v1","mode":"%s","dashboard_status":"%s","project_id":"%s","compose_project":"%s","issued_at":%s,"nonce":"%s"}\n' \
-  "$mode" "$dashboard_status" "$project_uuid" "$project" "$(date +%s)" "$ready_nonce" >"$ready_proof_file"
+printf '{"version":2,"kind":"agentotel.e2e-ready.v2","mode":"%s","dashboard_status":"%s","project_id":"%s","compose_project":"%s","launcher_pid":%s,"launcher_kind":"run-e2e","issued_at":%s,"nonce":"%s"}\n' \
+  "$mode" "$dashboard_status" "$project_uuid" "$project" "$$" "$(date +%s)" "$ready_nonce" >"$ready_proof_file"
 exec 9<"$ready_proof_file"
 rm -f "$ready_proof_file"
 export AGENTOTEL_E2E_READY_FD=9 AGENTOTEL_E2E_MODE="$mode"
